@@ -14,6 +14,12 @@ an explicit policy edit request passes the coaching proposals to the background 
 Replay coaching is currently enabled per Softmax account. For accounts without that feature, the workspace links to
 the replay and lets the student save a timestamped observation in a chat instead.
 
+## Policy and match statistics
+
+The Matches table sorts by episode, exact policy version, played time, hosted score, or policy win percentage. Choose a policy version to filter hosted matches and compare its mean hosted score with its league result. The live win percentage comes from Softmax's competition policy leaderboard over the last 72 hours (`wins / episodes_played`); ties for first count as wins. Hosted self-play scores stay separate. A version with no league games in that window shows no win percentage. **Discuss results** gives the coach that exact version's league sample and a hosted episode's statistics so recommendations can name a measurable hypothesis.
+
+The [Polyworld Buff Players page](https://metta-ai.github.io/polyworld-buff/GOTA/players/) provides deeper replay-derived behavior statistics and its [extractor notes](https://github.com/Metta-AI/polyworld-buff/blob/main/tools/PLAYERS.md) describe how those snapshots are generated. When the snapshot contains the exact selected policy version, the app shows its dated behavior sample and passes it to the coach. It does not present those metrics as live results. To add those metrics for new student versions, run the extractor in a hosted worker against verified replays and publish version-keyed aggregates; the workshop browser needs no local game dependencies.
+
 ## Quick start with an AI coding agent
 
 ```bash

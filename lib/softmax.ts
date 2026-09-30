@@ -24,6 +24,12 @@ const leagueSchema = z.object({
   rounds_paused_at: z.string().nullable(), submissions_locked_at: z.string().nullable(),
   settings: z.object({ ladder: z.object({ enabled: z.boolean() }) }),
 });
+const divisionSchema = z.object({ id: z.string(), name: z.string(), type: z.string() });
+const policyLeaderboardSchema = z.array(z.object({
+  rank: z.number(), policy_version_id: z.string(), policy_label: z.string(), player_id: z.string().nullable(),
+  player_name: z.string().nullable(), score: z.number(), rounds_played: z.number(),
+  wins: z.number(), episodes_played: z.number(), win_rate: z.number(),
+})).nullable();
 const experienceSchema = z.object({
   id: z.string(), requester_user_id: z.string(), status: z.string(),
   coworld_id: z.string(),
@@ -102,6 +108,17 @@ export async function whoami(token: string) {
 
 export async function getLeague(token: string) {
   return softmax(`/v2/leagues/${league.id}`, token, leagueSchema);
+}
+
+export async function getCompetitionDivision(token: string) {
+  const divisions = await softmax(`/v2/divisions?league_id=${league.id}`, token, z.array(divisionSchema));
+  const competition = divisions.find((division) => division.type === "competition");
+  if (!competition) throw new Error("The Gods of the Arena league has no competition division");
+  return competition;
+}
+
+export async function getPolicyLeaderboard(token: string, divisionId: string) {
+  return softmax(`/v2/divisions/${divisionId}/policy-leaderboard?window_minutes=4320`, token, policyLeaderboardSchema);
 }
 
 export async function listExperiences(token: string) {

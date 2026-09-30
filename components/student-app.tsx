@@ -15,6 +15,7 @@ import {
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PolicyRevision } from "../lib/semantic-ir";
+import { episodeScore, policyScore } from "../lib/policy-metrics";
 import { SemanticPolicy } from "./semantic-policy";
 
 type Job = {
@@ -46,8 +47,25 @@ type ArenaData = {
   league: { rounds_paused_at: string | null };
   episodes: ArenaEpisode[];
 };
+type LeaguePolicy = {
+  rank: number; policy_version_id: string; policy_label: string; score: number;
+  wins: number; episodes_played: number; win_rate: number; rounds_played: number;
+};
+type PolicyStats = { division: string; windowHours: number; policies: LeaguePolicy[] };
+type MatchStats = { steps: number | null; game_stats: Record<string, number>; policy_stats: { position: number; policy_name: string | null; avg_reward: number; avg_metrics: Record<string, number> }[] };
+type ReplaySnapshot = { id: string; games: number; windowStart: string; windowEnd: string; record: { wins: number; losses: number; draws: number }; values: Record<string, number> };
 type AnalysisRequest = { id: number; prompt: string };
-const contextMarker = /\n\n\[(?:coaching-session:csn_[0-9a-f-]{36}|replay-note:ereq_[0-9a-f-]{36}:xreq_[0-9a-f-]{36})\]$/;
+type SortKey = "episode" | "policy" | "played" | "score" | "winRate";
+const tableColumns: { key: SortKey; label: string }[] = [
+  { key: "episode", label: "Episode" }, { key: "policy", label: "Policy" },
+  { key: "played", label: "Played" }, { key: "score", label: "Score" },
+  { key: "winRate", label: "Policy win %" },
+];
+const contextMarker = /\n\n\[(?:coaching-session:csn_[0-9a-f-]{36}|replay-note:ereq_[0-9a-f-]{36}:xreq_[0-9a-f-]{36}|policy-stats:[0-9a-f-]{36}:xreq_[0-9a-f-]{36}:ereq_[0-9a-f-]{36})\]$/;
+
+function episodePolicyId(episode: ArenaEpisode) {
+  return episode.scores.length === 1 ? episode.scores[0].policy_version_id : null;
+}
 
 function ChatMessage() {
   const role = useAuiState((state) => state.message.role);
@@ -144,6 +162,12 @@ export function StudentApp({ league }: { league: League }) {
   const [arena, setArena] = useState<ArenaData | null>(null);
   const [arenaError, setArenaError] = useState("");
   const [episodes, setEpisodes] = useState<ArenaEpisode[]>([]);
+  const [policyStats, setPolicyStats] = useState<PolicyStats | null>(null);
+  const [policyStatsError, setPolicyStatsError] = useState("");
+  const [replaySnapshot, setReplaySnapshot] = useState<ReplaySnapshot | null>(null);
+  const [snapshotError, setSnapshotError] = useState("");
+  const [selectedPolicyId, setSelectedPolicyId] = useState("");
+  const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({ key: "played", direction: "desc" });
   const [coaching, setCoaching] = useState<CoachingSession[]>([]);
   const [coachingAvailable, setCoachingAvailable] = useState(false);
   const [coachingError, setCoachingError] = useState("");
@@ -151,6 +175,8 @@ export function StudentApp({ league }: { league: League }) {
   const [viewer, setViewer] = useState<{ url: string; ready: boolean } | null>(null);
   const [replayError, setReplayError] = useState("");
   const [replayNote, setReplayNote] = useState("");
+  const [matchStats, setMatchStats] = useState<MatchStats | null>(null);
+  const [matchStatsError, setMatchStatsError] = useState("");
   const [analysisRequest, setAnalysisRequest] = useState<AnalysisRequest | null>(null);
   const onJob = useCallback(() => { setActiveTab("episodes"); setRefreshKey((key) => key + 1); }, []);
 
@@ -195,6 +221,65 @@ export function StudentApp({ league }: { league: League }) {
     return () => window.clearInterval(timer);
   }, [email, refreshKey]);
 
+  useEffect(() => {
+    if (!email) return;
+    const refresh = () => fetch("/api/policy-stats").then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not load league policy results");
+      setPolicyStats(data);
+      setPolicyStatsError("");
+    }).catch((cause: Error) => setPolicyStatsError(cause.message));
+    refresh();
+    const timer = window.setInterval(refresh, 60000);
+    return () => window.clearInterval(timer);
+  }, [email, refreshKey]);
+
+  const boardByPolicy = new Map(policyStats?.policies.map((policy) => [policy.policy_version_id, policy]));
+  const policyIds = [...new Set(episodes.flatMap((episode) => episode.scores.map((score) => score.policy_version_id)))];
+  const activePolicyId = selectedPolicyId || job.result?.policyVersionId || policyIds[0] || "";
+  useEffect(() => {
+    if (!email || !activePolicyId) return;
+    let cancelled = false;
+    setReplaySnapshot(null);
+    setSnapshotError("");
+    fetch(`/api/replay-snapshot?policyId=${encodeURIComponent(activePolicyId)}`)
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Could not load the replay snapshot");
+        return data;
+      })
+      .then((data) => { if (!cancelled) setReplaySnapshot(data.snapshot ?? null); })
+      .catch((cause: Error) => { if (!cancelled) setSnapshotError(cause.message); });
+    return () => { cancelled = true; };
+  }, [email, activePolicyId]);
+  const activeStanding = boardByPolicy.get(activePolicyId);
+  const activeEpisodes = episodes.filter((episode) => episode.scores.some((score) => score.policy_version_id === activePolicyId));
+  const activeScores = activeEpisodes.map((episode) => policyScore(episode, activePolicyId)).filter((score): score is number => score !== null);
+  const hostedMean = activeScores.length ? activeScores.reduce((total, score) => total + score, 0) / activeScores.length : null;
+  const latestActiveEpisode = activeEpisodes.find((episode) => episode.status === "completed");
+  const visibleEpisodes = episodes.filter((episode) => !selectedPolicyId || episode.scores.some((score) => score.policy_version_id === selectedPolicyId));
+  const sortedEpisodes = [...visibleEpisodes].sort((a, b) => {
+    const value = (episode: ArenaEpisode): string | number | null => {
+      const policyId = episodePolicyId(episode);
+      if (sort.key === "episode") return (episode.job_index ?? 0) + 1;
+      if (sort.key === "policy") return selectedPolicyId ? boardByPolicy.get(selectedPolicyId)?.policy_label ?? selectedPolicyId : policyId ? boardByPolicy.get(policyId)?.policy_label ?? policyId : "Mixed";
+      if (sort.key === "played") return new Date(episode.completed_at ?? episode.created_at).getTime();
+      if (sort.key === "score") return selectedPolicyId ? policyScore(episode, selectedPolicyId) : episodeScore(episode);
+      if (sort.key === "winRate") return boardByPolicy.get(selectedPolicyId || policyId || "")?.win_rate ?? null;
+      return null;
+    };
+    const left = value(a);
+    const right = value(b);
+    if (left === null && right !== null) return 1;
+    if (right === null && left !== null) return -1;
+    const comparison = typeof left === "number" && typeof right === "number" ? left - right : String(left).localeCompare(String(right));
+    return (sort.direction === "asc" ? comparison : -comparison) || a.id.localeCompare(b.id);
+  });
+
+  function sortBy(key: SortKey) {
+    setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
+  }
+
   const selectedEpisode = episodes.find((episode) => episode.id === selectedEpisodeId);
   const selectedCoaching = coaching.find((item) => item.episode_id === selectedEpisode?.episode_id);
 
@@ -212,6 +297,21 @@ export function StudentApp({ league }: { league: League }) {
     }).catch((cause: Error) => { if (!cancelled) setReplayError(cause.message); });
     return () => { cancelled = true; };
   }, [selectedEpisode?.id, selectedEpisode?.replay_url, selectedEpisode?.run_id]);
+
+  useEffect(() => {
+    if (!selectedEpisode || selectedEpisode.status !== "completed") return;
+    let cancelled = false;
+    setMatchStats(null);
+    setMatchStatsError("");
+    fetch(`/api/episode-stats?runId=${encodeURIComponent(selectedEpisode.run_id)}&episodeId=${encodeURIComponent(selectedEpisode.id)}`)
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Could not load match statistics");
+        return data;
+      }).then((data) => { if (!cancelled) setMatchStats(data); })
+      .catch((cause: Error) => { if (!cancelled) setMatchStatsError(cause.message); });
+    return () => { cancelled = true; };
+  }, [selectedEpisode?.id, selectedEpisode?.status, selectedEpisode?.run_id]);
 
   useEffect(() => {
     if (!viewer || viewer.ready) return;
@@ -247,11 +347,18 @@ export function StudentApp({ league }: { league: League }) {
     setSubmission("");
     setArena(null);
     setEpisodes([]);
+    setPolicyStats(null);
+    setPolicyStatsError("");
+    setReplaySnapshot(null);
+    setSnapshotError("");
+    setSelectedPolicyId("");
     setSelectedEpisodeId("");
     setViewer(null);
     setCoaching([]);
     setCoachingError("");
     setReplayNote("");
+    setMatchStats(null);
+    setMatchStatsError("");
     setAnalysisRequest(null);
   }
 
@@ -299,6 +406,14 @@ export function StudentApp({ league }: { league: League }) {
     });
   }
 
+  function discussPolicyResults() {
+    if (!latestActiveEpisode || !activePolicyId) return;
+    setAnalysisRequest({
+      id: Date.now(),
+      prompt: `How is my policy doing? Use the league record and the latest hosted game to suggest one testable improvement. Ask me what I noticed in the replay.\n\n[policy-stats:${activePolicyId}:${latestActiveEpisode.run_id}:${latestActiveEpisode.id}]`,
+    });
+  }
+
   return <main className={`shell${email ? " signed-in" : ""}`}>
     {!email ? <header className="topbar">
       <a className="brand" href="/">NEURALHUB <span>×</span> GODS OF THE ARENA</a>
@@ -326,7 +441,7 @@ export function StudentApp({ league }: { league: League }) {
         <Chat key={email} onJob={onJob} onSignOut={signOut} analysisRequest={analysisRequest} />
         <section className="preview-card">
           <div className="tabs" role="tablist" aria-label="Workspace views">
-            <div><button role="tab" aria-selected={activeTab === "episodes"} className={activeTab === "episodes" ? "active" : ""} onClick={() => setActiveTab("episodes")}>Episodes</button>
+            <div><button role="tab" aria-selected={activeTab === "episodes"} className={activeTab === "episodes" ? "active" : ""} onClick={() => setActiveTab("episodes")}>Matches</button>
               <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} onClick={() => setActiveTab("policy")}>Policy <span className="tab-code">hero.bas</span></button></div>
             <span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span>
           </div>
@@ -338,9 +453,28 @@ export function StudentApp({ league }: { league: League }) {
             {submission ? <p className="submission">{submission}</p> : null}
             {job.result?.revision ?? starterRevision ? <SemanticPolicy key={job.result?.revision?.revisionId ?? "starter"} revision={job.result?.revision ?? starterRevision!} /> : <p className="muted policy-loading">Loading hero.bas…</p>}
           </div> : <div className="episodes-view">
-            <div className="episodes-heading"><div><img src="/gota/logo.png" alt="" /><div><h2>Episodes</h2><p>{episodes.length} games played in {league.name}</p></div></div><span className="sync-label">Updates every 30s</span></div>
+            <div className="episodes-heading"><div><img src="/gota/logo.png" alt="" /><div><h2>Matches</h2><p>{episodes.length} hosted games in {league.name}</p></div></div><a className="text-button" href="https://metta-ai.github.io/polyworld-buff/GOTA/players/" target="_blank" rel="noreferrer">Explore player stats ↗</a></div>
             {job.status !== "idle" && job.status !== "completed" ? <div className="job-banner"><span className="status-dot" />
               <span>{job.status === "failed" ? "The last policy job failed. Ask the coach to try again." : "Building your policy and requesting a hosted episode…"}</span></div> : null}
+            {episodes.length ? <section className="policy-performance" aria-label="Policy performance">
+              <div className="performance-top"><div><span className="eyebrow">Policy performance</span><strong>{boardByPolicy.get(activePolicyId)?.policy_label ?? job.result?.policyLabel ?? (activePolicyId ? `Policy ${activePolicyId.slice(0, 8)}` : "Select a policy")}</strong></div>
+                <select aria-label="Choose policy version" value={selectedPolicyId} onChange={(event) => { setSelectedPolicyId(event.target.value); setSelectedEpisodeId(""); setViewer(null); }}>
+                  <option value="">All matches · latest policy</option>
+                  {[...new Set([job.result?.policyVersionId, ...policyIds].filter((id): id is string => !!id))].map((id) => <option key={id} value={id}>{boardByPolicy.get(id)?.policy_label ?? (id === job.result?.policyVersionId ? job.result.policyLabel : `Policy ${id.slice(0, 8)}`)}</option>)}
+                </select></div>
+              <div className="performance-values">
+                <div><strong>{activeStanding ? `${(activeStanding.win_rate * 100).toFixed(1)}%` : "—"}</strong><span>League win % · {activeStanding ? `${activeStanding.wins}/${activeStanding.episodes_played} games` : "No league games in window"}</span></div>
+                <div><strong>{activeStanding ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(activeStanding.score) : "—"}</strong><span>League score · 72h</span></div>
+                <div><strong>{hostedMean === null ? "—" : new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(hostedMean)}</strong><span>Hosted mean score · {activeScores.length} games</span></div>
+              </div>
+              {replaySnapshot ? <div className="snapshot-metrics"><div><strong>Replay behavior · {replaySnapshot.games} hero-games</strong><span>{new Date(replaySnapshot.windowStart).toLocaleDateString()} – {new Date(replaySnapshot.windowEnd).toLocaleDateString()} · dated snapshot</span></div>
+                {["kills", "deaths", "tower_kills", "xp", "rejected_share"].map((name) => <div key={name}><b>{replaySnapshot.values[name] === undefined ? "—" : name === "rejected_share" ? `${(replaySnapshot.values[name] * 100).toFixed(1)}%` : new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(replaySnapshot.values[name])}</b><span>{name.replaceAll("_", " ")}</span></div>)}
+              </div> : null}
+              <div className="performance-bottom"><span>League win % uses competition games from the last 72 hours. Ties for first count as wins. Hosted self-play is scored separately.</span>
+                <button className="secondary" disabled={!latestActiveEpisode} onClick={discussPolicyResults}>Discuss results ↗</button></div>
+              {policyStatsError ? <p className="error">{policyStatsError}</p> : null}
+              {snapshotError ? <p className="error">{snapshotError}</p> : null}
+            </section> : null}
             {selectedEpisode ? <section className="replay-panel" aria-label="Selected replay">
               <div className="replay-head"><div><span className="eyebrow">Replay · #{(selectedEpisode.job_index ?? 0) + 1}</span><strong>{selectedEpisode.run_title || "Hosted game"}</strong></div>
                 <button className="text-button" onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div>
@@ -351,23 +485,31 @@ export function StudentApp({ league }: { league: League }) {
                 {selectedCoaching?.latest_analysis?.status === "complete" ? <button className="text-button" onClick={() => discussCoaching(selectedCoaching)}>Discuss coaching ↗</button> : null}
                 {coachingError ? <span className="error">{coachingError}</span> : null}
               </div>
+              {matchStats ? <details className="replay-metrics"><summary>Match statistics <span>{matchStats.steps === null ? "" : `${matchStats.steps} steps`}</span></summary>
+                <div>{Object.entries(matchStats.game_stats).map(([name, value]) => <span key={name}>{name.replaceAll("_", " ")} <b>{new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)}</b></span>)}
+                  {matchStats.policy_stats.map((policy) => <span key={policy.position}>Seat {policy.position + 1} reward <b>{new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(policy.avg_reward)}</b></span>)}
+                  {matchStats.policy_stats.flatMap((policy) => Object.entries(policy.avg_metrics).filter(([name]) => name !== "reward").map(([name, value]) => <span key={`${policy.position}-${name}`}>Seat {policy.position + 1} {name.replaceAll("_", " ")} <b>{new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)}</b></span>))}</div>
+              </details> : null}
+              {matchStatsError ? <p className="error replay-metrics-error">{matchStatsError}</p> : null}
               <div className="replay-note-box"><label htmlFor="replay-note">Notice something?</label>
                 <div><textarea id="replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero retreated too early…" />
                   <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Discuss in chat ↗</button></div></div>
             </section> : null}
             {arenaError ? <p className="error">{arenaError}</p> : null}
             {!arena ? <p className="muted">Loading episodes…</p> : episodes.length === 0 ? <div className="empty-games"><p>No games yet. Ask the coach to build a policy and start one.</p></div> :
-              <div className="episode-table-wrap"><table className="episode-table"><thead><tr><th>Episode</th><th>Played</th><th>Score</th><th>Status</th></tr></thead><tbody>
-                {episodes.map((episode) => {
-                  const recordedScores = episode.scores.length ? episode.scores.map((item) => item.score) : episode.participant_scores.map((item) => item.score);
-                  const score = recordedScores.length ? recordedScores.reduce((total, value) => total + value, 0) / recordedScores.length : null;
+              <div className="episode-table-wrap"><table className="episode-table"><thead><tr>{tableColumns.map((column) => <th key={column.key} aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" onClick={() => sortBy(column.key)}>{column.label}<span aria-hidden="true">{sort.key === column.key ? sort.direction === "asc" ? " ↑" : " ↓" : " ↕"}</span></button></th>)}</tr></thead><tbody>
+                {sortedEpisodes.map((episode) => {
+                  const score = selectedPolicyId ? policyScore(episode, selectedPolicyId) : episodeScore(episode);
+                  const policyId = selectedPolicyId || episodePolicyId(episode);
+                  const standing = policyId ? boardByPolicy.get(policyId) : undefined;
                   return <tr key={episode.id} className={selectedEpisodeId === episode.id ? "selected" : ""} tabIndex={0} role="button" aria-label={`Open replay for ${episode.run_title || "hosted game"}, episode ${(episode.job_index ?? 0) + 1}`} onClick={() => { setSelectedEpisodeId(episode.id); setViewer(null); setReplayError(""); setReplayNote(""); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
                     <td><strong>#{(episode.job_index ?? 0) + 1}</strong><span>{episode.run_title || "Hosted game"}</span></td>
+                    <td className="policy-cell" title={standing?.policy_label ?? policyId ?? "Multiple policies"}>{standing?.policy_label ?? (policyId ? `Policy ${policyId.slice(0, 8)}` : "Mixed")}</td>
                     <td>{new Date(episode.completed_at ?? episode.created_at).toLocaleString()}</td>
-                    <td className="score-cell" title="Average per policy when an episode has multiple policy scores">{score === null ? "—" : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(score)}</td>
-                    <td><span className={`episode-status ${episode.status}`}>{episode.status}</span><span className="row-arrow">↗</span></td>
+                    <td className="score-cell" title={selectedPolicyId ? "Recorded score for the selected policy" : "Average per policy when a match has multiple policies"}>{score === null ? "—" : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(score)}</td>
+                    <td className="win-cell" title="This exact policy version’s win rate in league games over the last 72 hours; not this hosted match’s outcome">{standing ? `${(standing.win_rate * 100).toFixed(1)}%` : "—"}</td>
                   </tr>;
-                })}</tbody></table></div>}
+                })}</tbody></table>{!sortedEpisodes.length ? <div className="empty-games">No hosted matches for this policy version yet.</div> : null}</div>}
           </div>}
         </section>
       </div>}

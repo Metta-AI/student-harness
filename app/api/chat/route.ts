@@ -4,8 +4,9 @@ import { NextResponse } from "next/server";
 import { start, getRun } from "workflow/api";
 import { z } from "zod";
 import { currentSession, sameOrigin, seal, setSessionCookie } from "../../../lib/session";
-import { getCoachingAnalysis, getCoachingSession, getEpisodeStats, getExperience } from "../../../lib/softmax";
+import { getCoachingAnalysis, getCoachingSession, getCompetitionDivision, getPolicyLeaderboard, getEpisodeStats, getExperience } from "../../../lib/softmax";
 import league from "../../../league.json";
+import { getPlayerSnapshot } from "../../../lib/player-snapshot";
 import type { PolicyRevision } from "../../../lib/semantic-ir";
 import { buildPolicy } from "../../../workflows/build-policy";
 
@@ -66,6 +67,33 @@ export async function POST(request: Request) {
       policy_stats: stats.policy_stats.slice(0, 10),
     });
   }
+  const policyStats = messages.map(({ text }) => /\[policy-stats:([0-9a-f-]{36}):(xreq_[0-9a-f-]{36}):(ereq_[0-9a-f-]{36})\]/.exec(text)).find(Boolean);
+  let policyContext = "";
+  if (policyStats) {
+    const experience = await getExperience(session.token, policyStats[2]);
+    if (experience.requester_user_id !== session.subjectId) return NextResponse.json({ error: "This run is not yours" }, { status: 403 });
+    const episode = experience.episodes.find((item) => item.id === policyStats[3]);
+    if (!episode || episode.status !== "completed" || !episode.scores.some((score) => score.policy_version_id === policyStats[1])) {
+      return NextResponse.json({ error: "This policy did not play in that episode" }, { status: 404 });
+    }
+    const division = await getCompetitionDivision(session.token);
+    const [board, stats] = await Promise.all([
+      getPolicyLeaderboard(session.token, division.id), getEpisodeStats(session.token, episode.id),
+    ]);
+    const [snapshotResult] = await Promise.allSettled([getPlayerSnapshot(policyStats[1])]);
+    const standing = board?.find((item) => item.policy_version_id === policyStats[1]);
+    const snapshot = snapshotResult.status === "fulfilled" ? snapshotResult.value : null;
+    policyContext = JSON.stringify({
+      policy_version_id: policyStats[1],
+      league_window_hours: 72,
+      league_standing: standing ? { wins: standing.wins, games: standing.episodes_played, win_rate: standing.win_rate, score: standing.score } : null,
+      recent_hosted_episode: { id: episode.id, completed_at: episode.completed_at, scores: episode.scores,
+        unique_policy_version_ids: episode.scores.map((score) => score.policy_version_id),
+        game_stats: stats.game_stats, policy_stats: stats.policy_stats },
+      replay_behavior_snapshot: snapshot ? { policy_version_id: snapshot.id, window_start: snapshot.windowStart, window_end: snapshot.windowEnd, games: snapshot.games,
+        record: snapshot.record, metrics: Object.fromEntries(Object.entries(snapshot.values).filter(([name]) => ["deaths", "kills", "assists", "xp", "tower_kills", "target_tower", "target_hero", "rejected_share", "time_below25", "lowhp_walks", "buy_heal", "score"].includes(name))) } : null,
+    });
+  }
 
   let previousSource: string | undefined;
   let previousRevision: PolicyRevision | undefined;
@@ -82,7 +110,7 @@ export async function POST(request: Request) {
     }
   }
   if (/^(please\s+)?(build|create|make|edit|improve|update|write)\b|^can you\s+(build|create|make|edit|improve|update|write)\b/i.test(latest.text.trim())) {
-    const task = `${latest.text}${coachingContext ? `\n\nReplay coaching evidence and proposed changes (not yet applied): ${coachingContext}` : ""}${replayContext ? `\n\nStudent's replay observation and episode results: ${replayContext}` : ""}`;
+    const task = `${latest.text}${coachingContext ? `\n\nReplay coaching evidence and proposed changes (not yet applied): ${coachingContext}` : ""}${replayContext ? `\n\nStudent's replay observation and episode results: ${replayContext}` : ""}${policyContext ? `\n\nPolicy performance observations: ${policyContext}` : ""}`;
     const run = await start(buildPolicy, [seal(session), task, previousRevision, previousSource]);
     return setSessionCookie({
       message: "I’m editing your policy, then I’ll upload it and request one hosted game. You can close this tab; progress will be here when you return.",
@@ -102,10 +130,12 @@ ${coachingContext ? `The student has already watched and coached a replay. Here 
 Talk through what they noticed. Begin with one specific observed moment or proposal and one natural question. Use recording seconds when useful. Do not dump the full report. Separate observations from hypotheses. Do not claim you watched the replay yourself.` : ""}
 ${replayContext ? `The student watched a replay and wrote an observation. Here is that note with the episode results: ${replayContext}
 Start from what the student noticed, ask one natural follow-up, and use results only when relevant. Do not claim you watched the replay or know what caused an outcome from scores alone.` : ""}
+${policyContext ? `The student asked to review policy performance. Here are league outcomes, one hosted episode and an optional dated replay snapshot: ${policyContext}
+The replay snapshot, when present, is matched by exact policy version ID. State the sample size and dates. Separate league outcomes, hosted self-play, and dated replay behavior. League wins include ties for first; do not infer an expected win rate from the number of seats. A hosted episode with one unique policy version is self-play, so other seats are not different policies. Identify one metric that could explain the results, and suggest one falsifiable next change or replay question. Treat the cause as a hypothesis. Keep the answer to four sentences.` : ""}
 Keep answers to two or three short sentences unless the student requests detail.`,
   });
   const result = await agent.generate({
-    messages: messages.map(({ role, text }) => ({ role, content: text.replace(/\n\n\[(?:coaching-session:csn_[0-9a-f-]{36}|replay-note:ereq_[0-9a-f-]{36}:xreq_[0-9a-f-]{36})\]$/, "") })),
+    messages: messages.map(({ role, text }) => ({ role, content: text.replace(/\n\n\[(?:coaching-session:csn_[0-9a-f-]{36}|replay-note:ereq_[0-9a-f-]{36}:xreq_[0-9a-f-]{36}|policy-stats:[0-9a-f-]{36}:xreq_[0-9a-f-]{36}:ereq_[0-9a-f-]{36})\]$/, "") })),
   });
   return NextResponse.json({ message: result.text });
 }

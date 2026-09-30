@@ -26,6 +26,7 @@ const leagueSchema = z.object({
 });
 const experienceSchema = z.object({
   id: z.string(), requester_user_id: z.string(), status: z.string(),
+  coworld_id: z.string(),
   episode_count: z.number(), pending_count: z.number(), submitted_count: z.number(),
   running_count: z.number(), completed_count: z.number(), failed_count: z.number(),
   created_at: z.string(), completed_at: z.string().nullable(),
@@ -36,9 +37,10 @@ const episodeSchema = z.object({
   live_url: z.string().nullable(), episode_id: z.string().nullable(),
   error: z.string().nullable(), job_index: z.number().nullable(),
   participant_scores: z.array(z.object({ position: z.number(), score: z.number() })),
+  scores: z.array(z.object({ policy_version_id: z.string(), score: z.number() })),
   created_at: z.string(), completed_at: z.string().nullable(),
 });
-const experiencePageSchema = z.object({ entries: z.array(experienceSchema) });
+const experiencePageSchema = z.object({ entries: z.array(experienceSchema), next_cursor: z.string().nullable() });
 const experienceDetailSchema = experienceSchema.extend({ episodes: z.array(episodeSchema) });
 const coachingAnalysisSummarySchema = z.object({ id: z.string(), status: z.string() });
 const coachingSessionSchema = z.object({
@@ -103,8 +105,32 @@ export async function getLeague(token: string) {
 }
 
 export async function listExperiences(token: string) {
-  const params = new URLSearchParams({ mine: "true", league_id: league.id, limit: "8" });
-  return (await softmax(`/v2/experience-requests?${params}`, token, experiencePageSchema)).entries;
+  const experiences: z.infer<typeof experienceSchema>[] = [];
+  let cursor: string | null = null;
+  do {
+    const params = new URLSearchParams({ mine: "true", league_id: league.id, limit: "100" });
+    if (cursor) params.set("cursor", cursor);
+    const page = await softmax(`/v2/experience-requests?${params}`, token, experiencePageSchema);
+    experiences.push(...page.entries);
+    cursor = page.next_cursor;
+  } while (cursor);
+  return experiences;
+}
+
+export async function createReplaySession(token: string, coworldId: string, replayUri: string) {
+  return softmax("/v2/coworlds/replays/session", token,
+    z.object({ viewer_url: z.url(), ready: z.boolean() }),
+    { coworld_id: coworldId, replay_uri: replayUri });
+}
+
+export async function replaySessionReady(token: string, viewerUrl: string) {
+  const pathname = new URL(viewerUrl).pathname;
+  const proxy = pathname.indexOf("/proxy/");
+  const path = pathname.slice(pathname.indexOf("/v2/"), proxy);
+  if (proxy < 0 || !/^\/v2\/coworlds\/replays\/[a-z0-9-]+\/sessions\/[0-9a-f-]+$/.test(path)) {
+    throw new Error("Invalid replay session URL");
+  }
+  return softmax(`${path}/proxy/healthz`, token, z.object({ ready: z.boolean() }));
 }
 
 export async function getExperience(token: string, requestId: string) {

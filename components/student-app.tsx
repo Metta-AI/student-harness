@@ -27,13 +27,11 @@ type Job = {
 };
 
 type League = { id: string; name: string };
-type Experience = {
-  id: string; status: string; episode_count: number; completed_count: number;
-  failed_count: number; created_at: string; title?: string | null;
-};
-type Episode = {
+type ArenaEpisode = {
   id: string; status: string; replay_url: string | null; live_url: string | null;
-  episode_id: string | null; error: string | null; job_index: number | null; completed_at: string | null;
+  episode_id: string | null; error: string | null; job_index: number | null; completed_at: string | null; created_at: string;
+  run_id: string; run_title: string | null; coworld_id: string;
+  scores: { policy_version_id: string; score: number }[];
   participant_scores: { position: number; score: number }[];
 };
 type CoachingSession = {
@@ -42,13 +40,9 @@ type CoachingSession = {
   feed: { summary: string | null; quote: string | null; insights: string[] } | null;
 };
 type ArenaData = {
-  league: {
-    name: string; description: string | null; rounds_paused_at: string | null;
-    submissions_locked_at: string | null; settings: { ladder: { enabled: boolean } };
-  };
-  experiences: Experience[];
+  league: { rounds_paused_at: string | null };
+  episodes: ArenaEpisode[];
 };
-type ExperienceDetail = Experience & { episodes: Episode[] };
 type AnalysisRequest = { id: number; prompt: string };
 const contextMarker = /\n\n\[(?:coaching-session:csn_[0-9a-f-]{36}|replay-note:ereq_[0-9a-f-]{36}:xreq_[0-9a-f-]{36})\]$/;
 
@@ -143,20 +137,19 @@ export function StudentApp({ league }: { league: League }) {
   const [submission, setSubmission] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [starterSource, setStarterSource] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "policy">("overview");
-  const [showAllRuns, setShowAllRuns] = useState(false);
-  const [showAllEpisodes, setShowAllEpisodes] = useState(false);
+  const [activeTab, setActiveTab] = useState<"episodes" | "policy">("episodes");
   const [arena, setArena] = useState<ArenaData | null>(null);
   const [arenaError, setArenaError] = useState("");
+  const [episodes, setEpisodes] = useState<ArenaEpisode[]>([]);
   const [coaching, setCoaching] = useState<CoachingSession[]>([]);
-  const [coachingAvailable, setCoachingAvailable] = useState<boolean | null>(null);
+  const [coachingAvailable, setCoachingAvailable] = useState(false);
   const [coachingError, setCoachingError] = useState("");
-  const [selectedRun, setSelectedRun] = useState("");
-  const [runDetail, setRunDetail] = useState<ExperienceDetail | null>(null);
   const [selectedEpisodeId, setSelectedEpisodeId] = useState("");
+  const [viewer, setViewer] = useState<{ url: string; ready: boolean } | null>(null);
+  const [replayError, setReplayError] = useState("");
   const [replayNote, setReplayNote] = useState("");
   const [analysisRequest, setAnalysisRequest] = useState<AnalysisRequest | null>(null);
-  const onJob = useCallback(() => { setActiveTab("overview"); setRefreshKey((key) => key + 1); }, []);
+  const onJob = useCallback(() => { setActiveTab("episodes"); setRefreshKey((key) => key + 1); }, []);
 
   useEffect(() => {
     fetch("/api/session").then((response) => response.json()).then((data) => setEmail(data.email));
@@ -173,48 +166,62 @@ export function StudentApp({ league }: { league: League }) {
 
   useEffect(() => {
     if (!email) return;
-    const refresh = () => fetch("/api/coaching").then(async (response) => {
+    const refresh = () => fetch("/api/arena").then(async (response) => {
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not load coaching sessions");
-      setCoaching(data.sessions);
-      setCoachingAvailable(data.available);
-      setCoachingError("");
-    }).catch((cause: Error) => setCoachingError(cause.message));
+      if (!response.ok) throw new Error(data.error ?? "Could not load episodes");
+      setArena(data);
+      setEpisodes(data.episodes);
+      setArenaError("");
+    }).catch((cause: Error) => setArenaError(cause.message));
     refresh();
-    const timer = window.setInterval(refresh, 15000);
+    const timer = window.setInterval(refresh, 30000);
     return () => window.clearInterval(timer);
   }, [email, refreshKey]);
 
   useEffect(() => {
     if (!email) return;
-    const refresh = () => fetch("/api/arena").then(async (response) => {
+    const refresh = () => fetch("/api/coaching").then(async (response) => {
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not load arena");
-      setArena(data);
-      setArenaError("");
-      setSelectedRun((current) => current || data.experiences[0]?.id || "");
-    }).catch((cause: Error) => setArenaError(cause.message));
+      if (!response.ok) throw new Error(data.error ?? "Could not load coaching");
+      setCoaching(data.sessions);
+      setCoachingAvailable(data.available);
+      setCoachingError("");
+    }).catch((cause: Error) => setCoachingError(cause.message));
     refresh();
-    const timer = window.setInterval(refresh, 15000);
+    const timer = window.setInterval(refresh, 30000);
     return () => window.clearInterval(timer);
   }, [email, refreshKey]);
 
-  useEffect(() => {
-    if (!email || !selectedRun) return;
-    const refresh = () => fetch(`/api/arena/${selectedRun}`).then(async (response) => {
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not load episodes");
-      setRunDetail(data);
-      setArenaError("");
-    }).catch((cause: Error) => setArenaError(cause.message));
-    refresh();
-    const timer = window.setInterval(refresh, 15000);
-    return () => window.clearInterval(timer);
-  }, [email, selectedRun, refreshKey]);
+  const selectedEpisode = episodes.find((episode) => episode.id === selectedEpisodeId);
+  const selectedCoaching = coaching.find((item) => item.episode_id === selectedEpisode?.episode_id);
 
   useEffect(() => {
-    if (job.result?.xpRequestId) setSelectedRun(job.result.xpRequestId);
-  }, [job.result?.xpRequestId]);
+    if (!selectedEpisode?.replay_url) return;
+    let cancelled = false;
+    fetch("/api/replay-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: selectedEpisode.run_id, episodeId: selectedEpisode.id }),
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not open replay");
+      if (!cancelled) setViewer({ url: data.viewer_url, ready: data.ready });
+    }).catch((cause: Error) => { if (!cancelled) setReplayError(cause.message); });
+    return () => { cancelled = true; };
+  }, [selectedEpisode?.id, selectedEpisode?.replay_url, selectedEpisode?.run_id]);
+
+  useEffect(() => {
+    if (!viewer || viewer.ready) return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      fetch(`/api/replay-session?viewerUrl=${encodeURIComponent(viewer.url)}`).then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Replay failed to start");
+        if (!cancelled && data.ready) { setReplayError(""); setViewer({ url: viewer.url, ready: true }); }
+      }).catch((cause: Error) => { if (!cancelled) setReplayError(cause.message); });
+    }, 2500);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [viewer]);
 
   async function signIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -236,10 +243,11 @@ export function StudentApp({ league }: { league: League }) {
     setJob({ status: "idle" });
     setSubmission("");
     setArena(null);
-    setRunDetail(null);
-    setSelectedRun("");
+    setEpisodes([]);
+    setSelectedEpisodeId("");
+    setViewer(null);
     setCoaching([]);
-    setCoachingAvailable(null);
+    setCoachingError("");
     setReplayNote("");
     setAnalysisRequest(null);
   }
@@ -260,25 +268,22 @@ export function StudentApp({ league }: { league: League }) {
     URL.revokeObjectURL(url);
   }
 
+  function discussReplay(episode: ArenaEpisode) {
+    const note = replayNote.trim();
+    if (!note) return;
+    setAnalysisRequest({
+      id: Date.now(),
+      prompt: `I watched this replay and noticed: ${note}\n\n[replay-note:${episode.id}:${episode.run_id}]`,
+    });
+    setReplayNote("");
+  }
+
   function discussCoaching(item: CoachingSession) {
     setAnalysisRequest({
       id: Date.now(),
       prompt: `Can we talk through what I noticed in this replay?\n\n[coaching-session:${item.id}]`,
     });
   }
-
-  function discussReplay(episode: Episode) {
-    const note = replayNote.trim();
-    if (!note) return;
-    setAnalysisRequest({
-      id: Date.now(),
-      prompt: `I watched this replay and noticed: ${note}\n\n[replay-note:${episode.id}:${selectedRun}]`,
-    });
-    setReplayNote("");
-  }
-
-  const selectedEpisode = runDetail?.episodes.find((episode) => episode.id === selectedEpisodeId)
-    ?? runDetail?.episodes.find((episode) => episode.status === "completed");
 
   return <main className={`shell${email ? " signed-in" : ""}`}>
     {!email ? <header className="topbar">
@@ -307,78 +312,47 @@ export function StudentApp({ league }: { league: League }) {
         <Chat key={email} onJob={onJob} onSignOut={signOut} analysisRequest={analysisRequest} />
         <section className="preview-card">
           <div className="tabs" role="tablist" aria-label="Workspace views">
-            <div><button role="tab" aria-selected={activeTab === "overview"} className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>Arena</button>
+            <div><button role="tab" aria-selected={activeTab === "episodes"} className={activeTab === "episodes" ? "active" : ""} onClick={() => setActiveTab("episodes")}>Episodes</button>
               <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} onClick={() => setActiveTab("policy")}>Policy <span className="tab-code">hero.bas</span></button></div>
             <span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span>
           </div>
           {activeTab === "policy" ? <div className="policy-view">
-            <div className="policy-toolbar"><div><span className="eyebrow">02 / Symbolic</span><h2>Policy source</h2><p>{job.result ? "Your latest hosted policy" : "The official starter policy"}</p></div>
-              {job.result ? <button className="secondary" onClick={downloadPolicy}>Download hero.bas ↓</button> : <a className="secondary" href="/hero.bas" download="hero.bas">Download hero.bas ↓</a>}</div>
-            <pre className="policy-code"><code>{job.result?.source ?? starterSource ?? "Loading hero.bas…"}</code></pre>
-          </div> : <div className="overview">
-            <section className="arena-hero">
-              <div className="hero-copy"><p className="eyebrow">01 / Semantic <span>→</span> 02 / Symbolic <span>→</span> 03 / Replay</p>
-                <h2>Ideas become<br /><em>arena moves.</em></h2>
-                <p>Shape a strategy in chat. Watch it play. Bring the replay back to improve it.</p>
-                <div className="hero-actions">
-                  {job.result ? <button className="primary-action" onClick={enterLeague}>Enter the league ↗</button> : <button className="primary-action" onClick={() => setActiveTab("policy")}>Explore the policy ↗</button>}
-                  <a href={`https://softmax.com/observatory/v2?tab=leagues&detail=league:${league.id}`} target="_blank" rel="noreferrer">View league ↗</a>
-                </div>
-              </div>
-              <div className="hero-art"><div className="art-grid" aria-hidden="true" /><img className="gota-logo" src="/gota/logo.png" alt="Gods of the Arena" />
-                <div className="hero-portraits" aria-hidden="true"><img src="/gota/vanguard-knight.png" alt="" /><img src="/gota/warlock.png" alt="" /><img src="/gota/druid-warden.png" alt="" /></div></div>
-            </section>
-            {job.status !== "idle" ? <div className="job-banner"><span className="status-dot" />
-              <span>{job.status === "completed" ? job.result?.summary : job.status === "failed" ? "The last policy job failed. Ask the coach to try again." : "The cloud agent is building your policy and requesting a hosted episode."}</span></div> : null}
+            <div className="policy-toolbar"><div><span className="eyebrow">Symbolic policy</span><h2>hero.bas</h2><p>{job.result ? "Latest hosted policy" : "Starter policy"}</p></div>
+              <div className="policy-actions">{job.result ? <button className="secondary" onClick={downloadPolicy}>Download ↓</button> : <a className="secondary" href="/hero.bas" download="hero.bas">Download ↓</a>}
+                {job.result ? <button className="secondary" onClick={enterLeague}>Enter league ↗</button> : null}</div></div>
             {submission ? <p className="submission">{submission}</p> : null}
-            <section className="episodes-panel">
-              <div className="panel-title"><div><p className="eyebrow">03 / Replay</p><h3>Games</h3></div><span className="sync-label">Updates every 15s</span></div>
-              {arenaError ? <p className="error">{arenaError}</p> : null}
-              {!arena ? <p className="muted">Loading your games…</p> : arena.experiences.length === 0 ?
-                <div className="empty-games"><span>◈</span><p>No games yet. Ask the coach to build a policy and start one.</p></div> :
-                <div className="run-layout"><div className="run-list" aria-label="Hosted runs">
-                  {arena.experiences.slice(0, showAllRuns ? undefined : 4).map((run) => <button key={run.id} className={`run-row ${selectedRun === run.id ? "selected" : ""}`} onClick={() => { setSelectedRun(run.id); setRunDetail(null); setSelectedEpisodeId(""); setReplayNote(""); setShowAllEpisodes(false); }}>
-                    <span><strong>{run.title || `Hosted run · ${new Date(run.created_at).toLocaleDateString()}`}</strong>
-                      <small>{new Date(run.created_at).toLocaleString()} · {run.completed_count}/{run.episode_count} complete</small></span>
-                    <span className={`run-status ${run.status}`}>{run.status}</span>
-                  </button>)}
-                  {arena.experiences.length > 4 ? <button className="show-more" onClick={() => setShowAllRuns(!showAllRuns)}>{showAllRuns ? "Show recent games ↑" : `All ${arena.experiences.length} games ↓`}</button> : null}</div>
-                  <div className="run-detail">
-                    {!runDetail || runDetail.id !== selectedRun ? <p className="muted">Loading episodes…</p> : <>
-                      <div className="run-detail-head"><div><strong>{runDetail.completed_count} of {runDetail.episode_count} completed</strong>
-                        <p>{runDetail.failed_count ? `${runDetail.failed_count} failed · ` : ""}Run {runDetail.status}</p></div>
-                        <a href={`https://softmax.com/observatory/v2?tab=experience-requests&detail=experience-request:${selectedRun}`} target="_blank" rel="noreferrer">Run details ↗</a></div>
-                      <div className="episode-list">{runDetail.episodes.slice().reverse().slice(0, showAllEpisodes ? undefined : 3).map((episode) => <div className="episode-row" key={episode.id}>
-                        <div className="episode-main"><span className="episode-index">#{(episode.job_index ?? 0) + 1}</span>
-                          <span><strong>{episode.status === "completed" ? "Replay ready" : `Episode ${episode.status}`}</strong>
-                            <small>{episode.completed_at ? new Date(episode.completed_at).toLocaleString() : episode.error ?? "Waiting for the hosted game"}</small></span></div>
-                        <div className="episode-actions">
-                          {episode.episode_id && episode.replay_url ? <a className="coach-replay-link" href={coachingAvailable ? `https://softmax.com/observatory/v2?tab=overview&detail=episode-coaching:${episode.episode_id}` : `https://softmax.com/observatory/v2?tab=overview&detail=episode-request:${episode.id}`} target="_blank" rel="noreferrer">{coachingAvailable ? "Watch & coach ↗" : "Watch replay ↗"}</a> : null}
-                          {coachingAvailable === false && episode.status === "completed" ? <button onClick={() => { setSelectedEpisodeId(episode.id); setReplayNote(""); }}>Add a note</button> : null}
-                        </div>
-                      </div>)}</div>
-                      {runDetail.episodes.length > 3 ? <button className="show-more" onClick={() => setShowAllEpisodes(!showAllEpisodes)}>{showAllEpisodes ? "Show fewer episodes ↑" : `All ${runDetail.episodes.length} episodes ↓`}</button> : null}
-                    </>}
-                  </div></div>}
-              {coachingAvailable === false && selectedEpisode ? <div className="replay-note-box">
-                <label htmlFor="replay-note">What stood out in episode #{(selectedEpisode.job_index ?? 0) + 1}?</label>
-                <p>Watch the replay, then jot down a moment in your own words. A timestamp helps you return to it.</p>
-                <textarea id="replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero kept retreating after its health recovered…" />
-                <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Talk it through ↗</button>
-              </div> : null}
-            </section>
-            {coachingAvailable ? <section className="coaching-panel">
-              <div className="panel-title"><div><p className="eyebrow">Feedback → next move</p><h3>Replay notes</h3></div>
-                <a href="https://softmax.com/observatory/coaching-sessions" target="_blank" rel="noreferrer">All coaching ↗</a></div>
-              {coachingError ? <p className="error">{coachingError}</p> : null}
-              {coaching.length ? <div className="coaching-list">{coaching.slice(0, 2).map((item) => <div className="coaching-row" key={item.id}>
-                <div><span className="coaching-date">{new Date(item.created_at).toLocaleString()} · {item.latest_analysis?.status === "complete" ? "Feedback ready" : item.latest_analysis?.status ?? item.status}</span>
-                  <strong>{item.feed?.summary || "Replay coaching session"}</strong>
-                  {item.feed?.insights[0] ? <p>{item.feed.insights[0]}</p> : null}</div>
-                <div className="coaching-actions"><a href={`https://softmax.com/observatory/v2?tab=overview&detail=coaching-session:${item.id}`} target="_blank" rel="noreferrer">Review ↗</a>
-                  {item.latest_analysis?.status === "complete" ? <button onClick={() => discussCoaching(item)}>Discuss in chat ↗</button> : null}</div>
-              </div>)}</div> : !coachingError ? <p className="muted">Your replay feedback will appear here after you coach a game.</p> : null}
+            <pre className="policy-code"><code>{job.result?.source ?? starterSource ?? "Loading hero.bas…"}</code></pre>
+          </div> : <div className="episodes-view">
+            <div className="episodes-heading"><div><img src="/gota/logo.png" alt="" /><div><h2>Episodes</h2><p>{episodes.length} games played in {league.name}</p></div></div><span className="sync-label">Updates every 30s</span></div>
+            {job.status !== "idle" && job.status !== "completed" ? <div className="job-banner"><span className="status-dot" />
+              <span>{job.status === "failed" ? "The last policy job failed. Ask the coach to try again." : "Building your policy and requesting a hosted episode…"}</span></div> : null}
+            {selectedEpisode ? <section className="replay-panel" aria-label="Selected replay">
+              <div className="replay-head"><div><span className="eyebrow">Replay · #{(selectedEpisode.job_index ?? 0) + 1}</span><strong>{selectedEpisode.run_title || "Hosted game"}</strong></div>
+                <button className="text-button" onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div>
+              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready ? <iframe key={viewer.url} className="replay-frame" src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} allow="autoplay; fullscreen" allowFullScreen /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
+              <div className="replay-footer">
+                <a href={`https://softmax.com/observatory/v2/episode-requests/${selectedEpisode.id}/watch`} target="_blank" rel="noreferrer">Open on Softmax ↗</a>
+                {coachingAvailable && selectedEpisode.episode_id ? <a href={`https://softmax.com/observatory/v2?tab=overview&detail=episode-coaching:${selectedEpisode.episode_id}`} target="_blank" rel="noreferrer">Coach this replay ↗</a> : null}
+                {selectedCoaching?.latest_analysis?.status === "complete" ? <button className="text-button" onClick={() => discussCoaching(selectedCoaching)}>Discuss coaching ↗</button> : null}
+                {coachingError ? <span className="error">{coachingError}</span> : null}
+              </div>
+              <div className="replay-note-box"><label htmlFor="replay-note">Notice something?</label>
+                <div><textarea id="replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero retreated too early…" />
+                  <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Discuss in chat ↗</button></div></div>
             </section> : null}
+            {arenaError ? <p className="error">{arenaError}</p> : null}
+            {!arena ? <p className="muted">Loading episodes…</p> : episodes.length === 0 ? <div className="empty-games"><p>No games yet. Ask the coach to build a policy and start one.</p></div> :
+              <div className="episode-table-wrap"><table className="episode-table"><thead><tr><th>Episode</th><th>Played</th><th>Score</th><th>Status</th></tr></thead><tbody>
+                {episodes.map((episode) => {
+                  const recordedScores = episode.scores.length ? episode.scores.map((item) => item.score) : episode.participant_scores.map((item) => item.score);
+                  const score = recordedScores.length ? recordedScores.reduce((total, value) => total + value, 0) / recordedScores.length : null;
+                  return <tr key={episode.id} className={selectedEpisodeId === episode.id ? "selected" : ""} tabIndex={0} role="button" aria-label={`Open replay for ${episode.run_title || "hosted game"}, episode ${(episode.job_index ?? 0) + 1}`} onClick={() => { setSelectedEpisodeId(episode.id); setViewer(null); setReplayError(""); setReplayNote(""); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
+                    <td><strong>#{(episode.job_index ?? 0) + 1}</strong><span>{episode.run_title || "Hosted game"}</span></td>
+                    <td>{new Date(episode.completed_at ?? episode.created_at).toLocaleString()}</td>
+                    <td className="score-cell" title="Average per policy when an episode has multiple policy scores">{score === null ? "—" : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(score)}</td>
+                    <td><span className={`episode-status ${episode.status}`}>{episode.status}</span><span className="row-arrow">↗</span></td>
+                  </tr>;
+                })}</tbody></table></div>}
           </div>}
         </section>
       </div>}

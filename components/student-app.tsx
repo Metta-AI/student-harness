@@ -6,6 +6,7 @@ import { episodeScore, policyScore } from "../lib/policy-metrics";
 import { SemanticPolicy } from "./semantic-policy";
 import { ReplayCoaching } from "./replay-coaching";
 import { Chat, type AnalysisRequest } from "./chat";
+import { ReplayFrame } from "./replay-frame";
 
 type WorkspaceVersion = {
   id: string; revision: number; summary: string; created_at: string;
@@ -420,7 +421,7 @@ export function StudentApp({ league }: { league: League }) {
             {selectedEpisode ? <section className="replay-panel" aria-label="Selected replay">
               <div className="replay-head"><div><span className="eyebrow">Replay · #{(selectedEpisode.job_index ?? 0) + 1}</span><strong>{selectedEpisode.run_title || "Hosted game"}</strong></div>
                 <button className="text-button" disabled={recordingCoaching} onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div>
-              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && selectedEpisode.episode_id ? <ReplayCoaching key={selectedEpisode.id} episode={selectedEpisode} sessions={coaching.filter((item) => item.episode_id === selectedEpisode.episode_id)} onSaved={() => setRefreshKey((key) => key + 1)} onDiscuss={discussCoaching} onRecordingChange={setRecordingCoaching} replay={<iframe key={viewer.url} className="replay-frame" src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} allow="autoplay; fullscreen" allowFullScreen />} /> : viewer?.ready ? <iframe key={viewer.url} className="replay-frame" src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} allow="autoplay; fullscreen" allowFullScreen /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
+              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && selectedEpisode.episode_id ? <ReplayCoaching key={selectedEpisode.id} episode={selectedEpisode} sessions={coaching.filter((item) => item.episode_id === selectedEpisode.episode_id)} onSaved={() => setRefreshKey((key) => key + 1)} onDiscuss={discussCoaching} onRecordingChange={setRecordingCoaching} replay={<ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} />} /> : viewer?.ready ? <ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
               <div className="replay-footer">
                 <a href={`https://softmax.com/observatory/v2/episode-requests/${selectedEpisode.id}/watch`} target="_blank" rel="noreferrer">Open on Softmax ↗</a>
                 {selectedCoaching?.latest_analysis?.status === "complete" && !viewer?.ready ? <button className="text-button" onClick={() => discussCoaching(selectedCoaching)}>Discuss coaching ↗</button> : null}

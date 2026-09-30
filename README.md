@@ -41,8 +41,13 @@ The web app is a Next.js workspace with an [eve](https://eve.dev) coach mounted 
 Vercel Sandbox. The sandbox is rebuilt from the student's saved history when the chat opens:
 `/workspace/hero.bas` is the working copy, `versions/` holds one file pair per saved revision,
 `experiments/` holds checked hosted results, `docs/` holds the game wiki snapshot, and the directory
-is a git repository with one commit per revision. The sandbox has no network access; every Softmax
-call runs in the app runtime through typed tools, so the student's token never enters the sandbox.
+is a git repository with one commit per revision. The snapshot also carries a clone of
+[optimizer-seed](https://github.com/Metta-AI/optimizer-seed/tree/aaln/semantic-ir-symbolic-loop) with a Gods of the
+Arena lab whose files are synced to Supabase after every turn, and a pinned `coworld` CLI behind an allowlisting
+shim (`agent/sandbox/scripts/`): read commands and `upload-policy --file` only, no Docker, no replay downloads. The
+sandbox network reaches only softmax.com, where the student's token is injected at the boundary, and the policy
+upload bucket; the token itself never enters the sandbox. Softmax calls that record history run in the app runtime
+through typed tools.
 
 Durable state lives in Supabase (`supabase/migrations/0001_workspace.sql`): students and their sealed
 Softmax tokens, policy revisions with the semantic IR pair, hosted-game experiments, and chat sessions.

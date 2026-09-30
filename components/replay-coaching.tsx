@@ -165,7 +165,8 @@ export function ReplayCoaching({ episode, sessions, replay, onSaved, onDiscuss, 
       onRecordingChange(true);
     } catch (cause) {
       recording?.abort();
-      setError(cause instanceof Error ? cause.message : "Could not start recording");
+      const denied = cause instanceof DOMException && (cause.name === "NotAllowedError" || cause.name === "SecurityError");
+      setError(denied ? "Recording needs microphone and tab-sharing permission. Allow both when the browser asks (in Brave, also lower Shields for this site or allow them under Site settings), then press Record again." : cause instanceof Error ? cause.message : "Could not start recording");
       setPhase("idle");
     }
   };

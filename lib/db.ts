@@ -172,3 +172,25 @@ export async function archiveChatSession(studentId: string, sessionId: string) {
   const result = await db().from("chat_sessions").update({ archived_at: new Date().toISOString() }).eq("session_id", sessionId).eq("student_id", studentId);
   if (result.error) throw new Error(`archive chat: ${result.error.message}`);
 }
+
+// ---------- workspace files (optimizer lab persistence) ----------
+
+const workspaceFileRow = z.object({ path: z.string(), content: z.string(), sha256: z.string(), updated_at: z.string() });
+export type WorkspaceFileRow = z.infer<typeof workspaceFileRow>;
+
+export async function listWorkspaceFiles(studentId: string): Promise<WorkspaceFileRow[]> {
+  const rows = must(await db().from("workspace_files").select("path, content, sha256, updated_at").eq("student_id", studentId).order("path"), "list workspace files");
+  return z.array(workspaceFileRow).parse(rows);
+}
+
+export async function upsertWorkspaceFiles(studentId: string, files: { path: string; content: string; sha256: string }[]) {
+  if (!files.length) return;
+  const result = await db().from("workspace_files").upsert(files.map((file) => ({ student_id: studentId, ...file, updated_at: new Date().toISOString() })), { onConflict: "student_id,path" });
+  if (result.error) throw new Error(`upsert workspace files: ${result.error.message}`);
+}
+
+export async function deleteWorkspaceFiles(studentId: string, paths: string[]) {
+  if (!paths.length) return;
+  const result = await db().from("workspace_files").delete().eq("student_id", studentId).in("path", paths);
+  if (result.error) throw new Error(`delete workspace files: ${result.error.message}`);
+}

@@ -1,7 +1,17 @@
+import { createHash } from "node:crypto";
 import type { SandboxSession } from "eve/sandbox";
 import starterSource from "../../hero.bas?raw";
-import { listExperiments, listPolicyVersionsWithSource, type ExperimentRow, type PolicyVersionRow } from "../../lib/db";
+import { deleteWorkspaceFiles, listExperiments, listPolicyVersionsWithSource, listWorkspaceFiles, upsertWorkspaceFiles, type ExperimentRow, type PolicyVersionRow } from "../../lib/db";
 import { importPolicy, type PolicyRevision } from "../../lib/semantic-ir";
+
+export const SEED_REPO = "https://github.com/Metta-AI/optimizer-seed";
+export const SEED_BRANCH = "aaln/semantic-ir-symbolic-loop";
+export const SEED_DIR = "/workspace/optimizer-seed";
+export const LAB_DIR = `${SEED_DIR}/games/gods-of-the-arena`;
+/** Files under the seed that hold the student's durable optimizer memory. Synced to Supabase after every turn. */
+const PERSISTED_SEED_PATHS = ["games/gods-of-the-arena", "WORKING_CONTEXT.md", "TENTATIVE_LESSONS.md", "best_practices.md", "closed_levers.md", "user_preferences.md"];
+const MAX_PERSISTED_FILES = 400;
+const MAX_PERSISTED_BYTES = 64 * 1024;
 
 export const starter = (): PolicyRevision => importPolicy(starterSource, true);
 
@@ -47,12 +57,33 @@ export async function writeExperiment(sandbox: SandboxSession, experiment: Exper
   await sandbox.writeTextFile({ path: `experiments/${experiment.xp_request_id}.json`, content: JSON.stringify(experiment, null, 2) + "\n" });
 }
 
+/** Persist the student's optimizer-seed lab and memory files. Called after every turn. */
+export async function syncLabFiles(sandbox: SandboxSession, subjectId: string) {
+  const listing = await sandbox.run({ command: `cd ${SEED_DIR} && find ${PERSISTED_SEED_PATHS.join(" ")} -type f -size -${MAX_PERSISTED_BYTES}c -not -path '*/.git/*' 2>/dev/null | head -n ${MAX_PERSISTED_FILES}` });
+  const paths = listing.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  const known = new Map((await listWorkspaceFiles(subjectId)).map((file) => [file.path, file.sha256]));
+  const changed: { path: string; content: string; sha256: string }[] = [];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    const content = await sandbox.readTextFile({ path: `${SEED_DIR}/${path}` });
+    if (content === null || content.includes("\u0000")) continue;
+    seen.add(path);
+    const sha256 = createHash("sha256").update(content).digest("hex");
+    if (known.get(path) !== sha256) changed.push({ path, content, sha256 });
+  }
+  await upsertWorkspaceFiles(subjectId, changed);
+  await deleteWorkspaceFiles(subjectId, [...known.keys()].filter((path) => !seen.has(path)));
+  return { synced: changed.length, tracked: seen.size };
+}
+
 /**
  * Rebuild /workspace from the student's saved history: the starter policy as revision 0, one
- * commit per saved revision, and one JSON file per hosted game already checked.
+ * commit per saved revision, one JSON file per hosted game already checked, and the student's
+ * optimizer-seed lab files written back over the freshly cloned seed.
  */
 export async function hydrateWorkspace(sandbox: SandboxSession, subjectId: string | null) {
   await run(sandbox, "mkdir -p /workspace/versions /workspace/experiments && cd /workspace && git init -q 2>/dev/null || true");
+  await sandbox.writeTextFile({ path: ".gitignore", content: "optimizer-seed/\n" });
   const versions = subjectId ? await listPolicyVersionsWithSource(subjectId) : [];
   const experiments = subjectId ? await listExperiments(subjectId) : [];
   const base = starter();
@@ -66,11 +97,14 @@ export async function hydrateWorkspace(sandbox: SandboxSession, subjectId: strin
     await commitVersion(sandbox, version, experiments.filter((experiment) => experiment.policy_version_id === version.id));
   }
   for (const experiment of experiments) await writeExperiment(sandbox, experiment);
+  const labFiles = subjectId ? await listWorkspaceFiles(subjectId) : [];
+  for (const file of labFiles) await sandbox.writeTextFile({ path: `${SEED_DIR}/${file.path}`, content: file.content });
   await sandbox.writeTextFile({ path: "STATUS.md", content: [
     `# Workspace status`, ``,
     `Student: ${subjectId ?? "(local development, no student)"}`,
     `Saved revisions: ${versions.length} (working copy is r${versions.at(-1)?.revision_number ?? 0})`,
     `Hosted games checked: ${experiments.length}`,
+    `Optimizer lab files restored: ${labFiles.length} (under optimizer-seed/)`,
     ``, `See WORKSPACE.md for the layout.`, ``,
   ].join("\n") });
 }

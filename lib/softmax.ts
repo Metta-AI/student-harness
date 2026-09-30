@@ -140,17 +140,32 @@ export async function listExperiences(token: string) {
   return experiences;
 }
 
-export async function createReplaySession(token: string, coworldId: string, replayUri: string) {
-  return softmax("/v2/coworlds/replays/session", token,
-    z.object({ viewer_url: z.url(), ready: z.boolean() }),
-    { coworld_id: coworldId, replay_uri: replayUri });
+const replayViewerHost = /^(?:[a-z0-9-]+\.cloudfront\.net|softmax\.com|[a-z0-9-]+\.softmax\.com)$/;
+
+/** Map an absolute viewer URL onto the first-party /replay-viewer proxy path. Unknown hosts pass through unchanged. */
+export function proxiedViewerUrl(viewerUrl: string) {
+  const url = new URL(viewerUrl);
+  if (url.protocol !== "https:" || !replayViewerHost.test(url.hostname)) return viewerUrl;
+  return `/replay-viewer/${url.hostname}${url.pathname}${url.search}${url.hash}`;
 }
 
+export async function createReplaySession(token: string, coworldId: string, replayUri: string) {
+  const session = await softmax("/v2/coworlds/replays/session", token,
+    z.object({ viewer_url: z.url(), ready: z.boolean() }),
+    { coworld_id: coworldId, replay_uri: replayUri });
+  return { ...session, viewer_url: proxiedViewerUrl(session.viewer_url) };
+}
+
+/**
+ * Readiness for a viewer URL. Static replay viewers (CloudFront bundles) are ready as soon as
+ * they are served; the legacy game-pod proxy exposes a healthz route that must report ready.
+ */
 export async function replaySessionReady(token: string, viewerUrl: string) {
-  const pathname = new URL(viewerUrl).pathname;
+  const pathname = new URL(viewerUrl, "https://softmax.com").pathname;
   const proxy = pathname.indexOf("/proxy/");
+  if (proxy < 0) return { ready: true };
   const path = pathname.slice(pathname.indexOf("/v2/"), proxy);
-  if (proxy < 0 || !/^\/v2\/coworlds\/replays\/[a-z0-9-]+\/sessions\/[0-9a-f-]+$/.test(path)) {
+  if (!/^\/v2\/coworlds\/replays\/[a-z0-9-]+\/sessions\/[0-9a-f-]+$/.test(path)) {
     throw new Error("Invalid replay session URL");
   }
   return softmax(`${path}/proxy/healthz`, token, z.object({ ready: z.boolean() }));

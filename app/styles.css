@@ -304,3 +304,9 @@ h1 em { font-style: normal; color: #6b6560; }
 .version-history li span { font-size: 13px; }
 .version-history li small { grid-column: 2; color: var(--muted); font-size: 11px; }
 .version-empty { font-size: 13px; margin: 0 0 18px; max-width: 560px; }
+
+/* Replay viewer readiness */
+.replay-frame-wrap { position: relative; min-height: 0; }
+.replay-frame-wrap .replay-frame { display: block; }
+.replay-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; font-size: 13px; color: #d6d3d1; background: #141414e6; }
+.replay-overlay.error { color: #f3c1c1; }

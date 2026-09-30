@@ -1,8 +1,10 @@
-.env*
 !.env.example
+.env*
+.eve/
 .next/
-node_modules/
-*.tsbuildinfo
-next-env.d.ts
-/.swc
+.output/
 .vercel
+*.tsbuildinfo
+/.swc
+next-env.d.ts
+node_modules/

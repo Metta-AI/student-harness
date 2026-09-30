@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test:semantic": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/*.test.mjs"
+    "test:semantic": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/semantic-ir.test.mjs tests/policy-metrics.test.mjs",
+    "eve:dev": "eve dev",
+    "eve:info": "eve info",
+    "db:migrate": "psql \"$POSTGRES_URL_NON_POOLING\" -v ON_ERROR_STOP=1 -f supabase/migrations/0001_workspace.sql"
   },
   "repository": {
     "type": "git",
@@ -21,21 +24,24 @@
   },
   "homepage": "https://github.com/Metta-AI/student-harness#readme",
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.69",
-    "@assistant-ui/react": "^0.15.22",
-    "@assistant-ui/react-markdown": "^0.14.17",
+    "@supabase/supabase-js": "^2.117.2",
     "ai": "^7.0.123",
-    "assistant-cloud": "^0.2.3",
+    "eve": "^0.68.0",
+    "fix-webm-duration": "^1.0.6",
     "next": "^16.3.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "workflow": "^4.8.9",
+    "react-markdown": "^10.1.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "just-bash": "^3.4.2",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

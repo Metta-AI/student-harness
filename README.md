@@ -5,8 +5,10 @@ Build a BASIC policy for [Gods of the Arena](https://softmax.com/gods-of-the-are
 The IDE tracks each policy as one revision containing `hero.bas`, a seven-layer semantic IR, exact source offsets and SHA-256 hashes, parent revision, coaching evidence references, and separate verification receipts. The policy tab links strategy rules to highlighted BASIC lines. Download **IR + BASIC** to inspect the pair. A new agent edit creates a new pair before the BASIC source is uploaded. The semantic description is authored intent; the source map checks representation only. Behavior and competitive performance remain unverified until independent replay and hosted-game checks exist.
 
 This is a source-map adapter for the [optimizer-seed semantic IR ↔ symbolic proposal](https://github.com/Metta-AI/optimizer-seed/blob/aaln/semantic-ir-symbolic-loop/docs/specs/0001-semantic-ir-symbolic-loop.md). Its seven layers and separate receipts follow that proposal. It does not use the proposed whole-program compiler or reverse recognizer, which are not implemented for this `hero.bas` version. Existing policies are imported with unknown intent and retain their executable bytes.
-The browser app asks for a Softmax user token, lets a student describe a strategy in chat, and starts a durable cloud job.
-That job edits the policy, uploads it, and requests one hosted episode. The student can then enter the league.
+The browser app asks for a Softmax user token and gives the student a durable coach with a real shell over their
+policy workspace. The coach edits `hero.bas`, saves revisions, uploads them, requests hosted episodes, and reads
+results through typed tools. The student enters the league from the Policy tab or by asking the coach, who must
+get their approval in the chat first.
 The workspace reads live league status and the student's hosted runs from Softmax. **Watch & coach** opens the
 episode replay in Observatory, where students can narrate, mark moments, and record feedback. Completed coaching
 sessions appear back in the workspace. **Discuss in chat** starts a saved conversation grounded in that feedback;
@@ -34,16 +36,41 @@ The live league ID is in `league.json`; `xp.json` uses it. Replace `POLICY_VERSI
 
 ## Web app
 
-Create `.env.local` from `.env.example`. Set `SESSION_SECRET` to a random 32-byte hex string, an Anthropic API key,
-and an assistant-ui Cloud project key and frontend URL. The project key stays on the server. Threads and chat history
-are saved in assistant-ui Cloud under the signed-in Softmax user.
-Run `npm install` and `npm run dev`. Deploy this Next.js project to Vercel from the repo root. Vercel Workflow stores
-running jobs; there is no separate worker or database. The Softmax token is encrypted in an HTTP-only cookie and only
-sent to `softmax.com` by server routes. Each browser session tracks its latest job. The generated file can be downloaded
-from the result panel.
+The web app is a Next.js workspace with an [eve](https://eve.dev) coach mounted at `/eve/v1/*` by
+`withEve` in `next.config.ts`. Each chat is a durable eve session on Vercel Workflow with its own
+Vercel Sandbox. The sandbox is rebuilt from the student's saved history when the chat opens:
+`/workspace/hero.bas` is the working copy, `versions/` holds one file pair per saved revision,
+`experiments/` holds checked hosted results, `docs/` holds the game wiki snapshot, and the directory
+is a git repository with one commit per revision. The sandbox has no network access; every Softmax
+call runs in the app runtime through typed tools, so the student's token never enters the sandbox.
 
-The default `league.json` points to the existing public Gods of the Arena league. Change it to the class league ID once
-that league exists. A student can test against the public league before the class league is ready.
+Durable state lives in Supabase (`supabase/migrations/0001_workspace.sql`): students and their sealed
+Softmax tokens, policy revisions with the semantic IR pair, hosted-game experiments, and chat sessions.
+Only the server uses the service key; the tables have row level security enabled with no policies.
+
+Agent files live under `agent/`: `instructions.md` (coach identity and workflow), `tools/` (save,
+upload, request and check hosted games, list revisions, league standing, coaching feedback, and an
+approval-gated league entry), `skills/gota-rules` (wiki snapshot), `sandbox/sandbox.ts` (Vercel Sandbox with
+hydration), and `channels/eve.ts` (accepts the arena's own student cookie).
+
+### Setup
+
+1. Create `.env.local` from `.env.example`. `SESSION_SECRET` is 32 random bytes in hex; it seals the
+   student cookie and the stored Softmax tokens, so the Next app and the eve service must share it.
+2. Provision Supabase from the linked Vercel project: `vercel integration add supabase`, then
+   `vercel env pull .env.local` and `npm run db:migrate` (uses `psql` and `POSTGRES_URL`).
+3. `vercel env pull` also writes `VERCEL_OIDC_TOKEN`, which the eve service needs locally to create
+   Vercel Sandboxes. Refresh it when sandbox creation starts failing with an auth error.
+4. `npm install` and `npm run dev`. Next boots the eve dev server beside it. `npm run eve:info`
+   prints what eve discovered under `agent/`.
+
+Deploy the project to Vercel from the repo root. `withEve` emits the eve service and routes; the same
+project environment must carry `SESSION_SECRET`, `ANTHROPIC_API_KEY`, and the Supabase variables.
+Students sign in with a Softmax user token; it is encrypted in an HTTP-only cookie and stored sealed
+in the students table so the durable coach can act as them between requests.
+
+The default `league.json` points to the existing public Gods of the Arena league. Change it to the
+class league ID once that league exists.
 
 ## I want to simulate on my machine
 

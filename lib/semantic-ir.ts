@@ -90,16 +90,17 @@ export function importPolicy(source: string, isStarter: boolean): PolicyRevision
   });
 }
 
-export function reconcilePolicy(parent: PolicyRevision, change: SemanticChange, evidence: string[]): PolicyRevision {
+export type SemanticFields = SemanticChange["semantic"];
+export const semanticFieldsSchema = semanticChangeSchema.shape.semantic;
+
+/** Apply one replaced span [start, end) -> after to the parent revision and record it as a new source-linked rule. */
+function applySpan(parent: PolicyRevision, start: number, end: number, after: string, summary: string, semantic: SemanticFields, evidence: string[]): PolicyRevision {
   if (revision(parent.source, parent.ir).revisionId !== parent.revisionId) throw new Error("Parent revision changed since creation");
-  const { before, after, summary, semantic } = semanticChangeSchema.parse(change);
-  if (before === after) throw new Error("Semantic change did not modify BASIC source");
-  const start = parent.source.indexOf(before);
-  if (start < 0 || parent.source.indexOf(before, start + 1) >= 0) throw new Error("BASIC edit must match exactly one source span");
-  const end = start + before.length;
   const source = parent.source.slice(0, start) + after + parent.source.slice(end);
+  if (source === parent.source) throw new Error("Semantic change did not modify BASIC source");
+  if (after.length === 0) throw new Error("Replacement span must keep at least one character to link the rule to source");
   if (Buffer.byteLength(source, "utf8") > 64 * 1024) throw new Error("Edited policy exceeds the 64 KiB source limit");
-  const delta = after.length - before.length;
+  const delta = after.length - (end - start);
   const ir = structuredClone(parent.ir);
   for (const rule of ir.strategy) {
     const span = rule.source;
@@ -124,4 +125,41 @@ export function reconcilePolicy(parent: PolicyRevision, change: SemanticChange, 
   ir.update = { revision: n, parent: parent.revisionId, change: summary, evidence,
     research_plan: { hypothesis: semantic.hypothesis, expected: semantic.expected, non_trigger: semantic.non_trigger } };
   return revision(source, ir);
+}
+
+/** Reconcile a change expressed as one unique before/after substring pair. */
+export function reconcilePolicy(parent: PolicyRevision, change: SemanticChange, evidence: string[]): PolicyRevision {
+  const { before, after, summary, semantic } = semanticChangeSchema.parse(change);
+  if (before === after) throw new Error("Semantic change did not modify BASIC source");
+  const start = parent.source.indexOf(before);
+  if (start < 0 || parent.source.indexOf(before, start + 1) >= 0) throw new Error("BASIC edit must match exactly one source span");
+  return applySpan(parent, start, start + before.length, after, summary, semantic, evidence);
+}
+
+/**
+ * Reconcile a whole new source text against the parent. The changed region is the
+ * smallest window between the common prefix and suffix, widened to whole lines so the
+ * new rule links to readable source even for deletions.
+ */
+export function reconcileSource(parent: PolicyRevision, nextSource: string, summary: string, semantic: SemanticFields, evidence: string[]): PolicyRevision {
+  const old = parent.source;
+  if (old === nextSource) throw new Error("hero.bas is unchanged since the last saved revision");
+  let prefix = 0;
+  const max = Math.min(old.length, nextSource.length);
+  while (prefix < max && old[prefix] === nextSource[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < max - prefix && old[old.length - 1 - suffix] === nextSource[nextSource.length - 1 - suffix]) suffix++;
+  // Widen to whole lines.
+  let start = old.lastIndexOf("\n", prefix - 1) + 1;
+  let oldEnd = old.indexOf("\n", old.length - suffix);
+  oldEnd = oldEnd < 0 ? old.length : oldEnd + 1;
+  let newEnd = nextSource.length - (old.length - oldEnd);
+  // A pure deletion can leave an empty replacement; grow the window one line at a time.
+  while (newEnd <= start && (start > 0 || oldEnd < old.length)) {
+    if (start > 0) start = old.lastIndexOf("\n", start - 2) + 1;
+    else { const next = old.indexOf("\n", oldEnd); oldEnd = next < 0 ? old.length : next + 1; }
+    newEnd = nextSource.length - (old.length - oldEnd);
+  }
+  const after = nextSource.slice(start, newEnd);
+  return applySpan(parent, start, oldEnd, after, summary, semanticFieldsSchema.parse(semantic), evidence);
 }

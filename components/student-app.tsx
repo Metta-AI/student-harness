@@ -1,33 +1,20 @@
 "use client";
 
-import {
-  AssistantCloud,
-  AssistantRuntimeProvider,
-  ComposerPrimitive,
-  MessagePrimitive,
-  ThreadPrimitive,
-  ThreadListItemPrimitive,
-  ThreadListPrimitive,
-  useAuiState,
-  useLocalRuntime,
-  type ChatModelAdapter,
-} from "@assistant-ui/react";
-import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PolicyRevision } from "../lib/semantic-ir";
 import { episodeScore, policyScore } from "../lib/policy-metrics";
 import { SemanticPolicy } from "./semantic-policy";
+import { ReplayCoaching } from "./replay-coaching";
+import { Chat, type AnalysisRequest } from "./chat";
 
-type Job = {
-  status: string;
-  result?: {
-    source: string;
-    revision: PolicyRevision;
-    summary: string;
-    policyVersionId: string;
-    policyLabel: string;
-    xpRequestId: string;
-  };
+type WorkspaceVersion = {
+  id: string; revision: number; summary: string; created_at: string;
+  policyVersionId: string | null; label: string | null; games: number; hostedMean: number | null; scored: number;
+};
+type WorkspaceExperiment = { xpRequestId: string; title: string; status: string; created_at: string; revision: number | null };
+type Workspace = {
+  versions: WorkspaceVersion[]; experiments: WorkspaceExperiment[];
+  latest: PolicyRevision | null; latestUpload: { policyVersionId: string; label: string } | null;
 };
 
 type League = { id: string; name: string };
@@ -54,107 +41,23 @@ type LeaguePolicy = {
 type PolicyStats = { division: string; windowHours: number; policies: LeaguePolicy[] };
 type MatchStats = { steps: number | null; game_stats: Record<string, number>; policy_stats: { position: number; policy_name: string | null; avg_reward: number; avg_metrics: Record<string, number> }[] };
 type ReplaySnapshot = { id: string; games: number; windowStart: string; windowEnd: string; record: { wins: number; losses: number; draws: number }; values: Record<string, number> };
-type AnalysisRequest = { id: number; prompt: string };
 type SortKey = "episode" | "policy" | "played" | "score" | "winRate";
 const tableColumns: { key: SortKey; label: string }[] = [
   { key: "episode", label: "Episode" }, { key: "policy", label: "Policy" },
   { key: "played", label: "Played" }, { key: "score", label: "Score" },
   { key: "winRate", label: "Policy win %" },
 ];
-const contextMarker = /\n\n\[(?:coaching-session:csn_[0-9a-f-]{36}|replay-note:ereq_[0-9a-f-]{36}:xreq_[0-9a-f-]{36}|policy-stats:[0-9a-f-]{36}:xreq_[0-9a-f-]{36}:ereq_[0-9a-f-]{36})\]$/;
-
 function episodePolicyId(episode: ArenaEpisode) {
   return episode.scores.length === 1 ? episode.scores[0].policy_version_id : null;
-}
-
-function ChatMessage() {
-  const role = useAuiState((state) => state.message.role);
-  return <MessagePrimitive.Root className={`message ${role}`}>
-    <span className="message-label">{role === "user" ? "You" : "Assistant"}</span>
-    <MessagePrimitive.Parts components={{ Text: role === "user" ? ({ text }) => <p>{text.replace(contextMarker, "")}</p> : () => <MarkdownTextPrimitive /> }} />
-  </MessagePrimitive.Root>;
-}
-
-function Chat({ onJob, onSignOut, analysisRequest }: {
-  onJob: () => void; onSignOut: () => void; analysisRequest: AnalysisRequest | null;
-}) {
-  const cloud = useMemo(() => new AssistantCloud({
-    baseUrl: process.env.NEXT_PUBLIC_ASSISTANT_BASE_URL!,
-    authToken: async () => {
-      const response = await fetch("/api/assistant-ui-token", { method: "POST" });
-      return response.ok ? response.text() : null;
-    },
-  }), []);
-  const adapter = useMemo<ChatModelAdapter>(() => ({
-    async run({ messages, abortSignal }) {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: (() => {
-            const all = messages.map((message) => ({
-            role: message.role,
-            text: message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n"),
-            })).filter((message) => message.role === "user" || message.role === "assistant");
-            const recent = all.slice(-20);
-            const anchor = all.find((message) => contextMarker.test(message.text));
-            return anchor && !recent.includes(anchor) ? [anchor, ...all.slice(-19)] : recent;
-          })(),
-        }),
-        signal: abortSignal,
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Chat request failed");
-      if (data.runId) onJob();
-      return { content: [{ type: "text", text: data.message }] };
-    },
-  }), [onJob]);
-  const runtime = useLocalRuntime(adapter, { cloud });
-  const lastAnalysis = useRef(0);
-
-  useEffect(() => {
-    if (!analysisRequest || lastAnalysis.current === analysisRequest.id) return;
-    lastAnalysis.current = analysisRequest.id;
-    void runtime.threads.switchToNewThread().then(() => runtime.thread.append(analysisRequest.prompt));
-  }, [analysisRequest, runtime]);
-
-  return <AssistantRuntimeProvider runtime={runtime}>
-    <aside className="chat-rail">
-      <div className="rail-top"><a className="brand" href="/">NEURALHUB <span>×</span> ARENA</a>
-        <button className="text-button" onClick={onSignOut}>Sign out</button></div>
-      <ThreadListPrimitive.Root className="thread-list">
-        <div className="thread-list-header"><span>Conversations</span>
-          <ThreadListPrimitive.New className="new-thread" aria-label="New chat"><span aria-hidden="true">＋</span> New chat</ThreadListPrimitive.New></div>
-        <div className="thread-items"><ThreadListPrimitive.Items>
-          {() => <ThreadListItemPrimitive.Root className="thread-item">
-            <ThreadListItemPrimitive.Trigger className="thread-trigger">
-              <ThreadListItemPrimitive.Title fallback="New chat" />
-            </ThreadListItemPrimitive.Trigger>
-            <ThreadListItemPrimitive.Archive className="thread-archive" aria-label="Archive chat">×</ThreadListItemPrimitive.Archive>
-          </ThreadListItemPrimitive.Root>}
-        </ThreadListPrimitive.Items></div>
-      </ThreadListPrimitive.Root>
-      <ThreadPrimitive.Root className="thread">
-        <ThreadPrimitive.Viewport className="messages">
-          <ThreadPrimitive.Empty><div className="chat-empty"><span className="chat-empty-icon">✳</span>
-            <p>Describe a strategy, or bring back feedback from a replay.</p></div></ThreadPrimitive.Empty>
-          <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-        </ThreadPrimitive.Viewport>
-        <div className="composer-wrap"><ComposerPrimitive.Root className="composer">
-          <ComposerPrimitive.Input className="composer-input" placeholder="Ask about strategy or build a policy…" />
-          <div className="composer-footer"><span>Ask, build, or review a game</span>
-            <ComposerPrimitive.Send className="send-button">Send <span aria-hidden="true">↗</span></ComposerPrimitive.Send></div>
-        </ComposerPrimitive.Root></div>
-      </ThreadPrimitive.Root>
-    </aside>
-  </AssistantRuntimeProvider>;
 }
 
 export function StudentApp({ league }: { league: League }) {
   const [email, setEmail] = useState<string | null | undefined>(undefined);
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
-  const [job, setJob] = useState<Job>({ status: "idle" });
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [viewRevision, setViewRevision] = useState<number | null>(null);
+  const [viewed, setViewed] = useState<{ revision: PolicyRevision; upload: { policyVersionId: string; label: string | null } | null } | null>(null);
   const [submission, setSubmission] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [starterRevision, setStarterRevision] = useState<PolicyRevision | null>(null);
@@ -178,7 +81,13 @@ export function StudentApp({ league }: { league: League }) {
   const [matchStats, setMatchStats] = useState<MatchStats | null>(null);
   const [matchStatsError, setMatchStatsError] = useState("");
   const [analysisRequest, setAnalysisRequest] = useState<AnalysisRequest | null>(null);
-  const onJob = useCallback(() => { setActiveTab("episodes"); setRefreshKey((key) => key + 1); }, []);
+  const [recordingCoaching, setRecordingCoaching] = useState(false);
+  const [workspaceKey, setWorkspaceKey] = useState(0);
+  // Tool results refresh the workspace panel; a finished turn also refreshes the arena feeds.
+  const onActivity = useCallback((kind: "tool" | "turn") => {
+    setWorkspaceKey((key) => key + 1);
+    if (kind === "turn") setRefreshKey((key) => key + 1);
+  }, []);
 
   useEffect(() => {
     fetch("/api/session").then((response) => response.json()).then((data) => setEmail(data.email));
@@ -187,11 +96,14 @@ export function StudentApp({ league }: { league: League }) {
 
   useEffect(() => {
     if (!email) return;
-    const refresh = () => fetch("/api/job").then((response) => response.json()).then(setJob);
+    const refresh = () => fetch("/api/workspace").then(async (response) => {
+      const data = await response.json();
+      if (response.ok) setWorkspace(data);
+    }).catch(() => undefined);
     refresh();
-    const timer = window.setInterval(refresh, 4000);
+    const timer = window.setInterval(refresh, 8000);
     return () => window.clearInterval(timer);
-  }, [email, refreshKey]);
+  }, [email, refreshKey, workspaceKey]);
 
   useEffect(() => {
     if (!email) return;
@@ -234,9 +146,23 @@ export function StudentApp({ league }: { league: League }) {
     return () => window.clearInterval(timer);
   }, [email, refreshKey]);
 
+  useEffect(() => {
+    if (!email || viewRevision === null) { setViewed(null); return; }
+    let cancelled = false;
+    fetch(`/api/workspace?revision=${viewRevision}`).then(async (response) => {
+      const data = await response.json();
+      if (!cancelled && response.ok) setViewed(data);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [email, viewRevision]);
+  const latestUpload = workspace?.latestUpload ?? null;
+  const currentRevision = viewed?.revision ?? workspace?.latest ?? starterRevision;
+  const currentUpload = viewRevision === null ? latestUpload : viewed?.upload ?? null;
+  const pendingExperiments = workspace?.experiments.filter((experiment) => experiment.status !== "completed" && experiment.status !== "failed") ?? [];
+
   const boardByPolicy = new Map(policyStats?.policies.map((policy) => [policy.policy_version_id, policy]));
   const policyIds = [...new Set(episodes.flatMap((episode) => episode.scores.map((score) => score.policy_version_id)))];
-  const activePolicyId = selectedPolicyId || job.result?.policyVersionId || policyIds[0] || "";
+  const activePolicyId = selectedPolicyId || latestUpload?.policyVersionId || policyIds[0] || "";
   useEffect(() => {
     if (!email || !activePolicyId) return;
     let cancelled = false;
@@ -343,7 +269,8 @@ export function StudentApp({ league }: { league: League }) {
   async function signOut() {
     await fetch("/api/session", { method: "DELETE" });
     setEmail(null);
-    setJob({ status: "idle" });
+    setWorkspace(null);
+    setViewRevision(null);
     setSubmission("");
     setArena(null);
     setEpisodes([]);
@@ -360,17 +287,20 @@ export function StudentApp({ league }: { league: League }) {
     setMatchStats(null);
     setMatchStatsError("");
     setAnalysisRequest(null);
+    setRecordingCoaching(false);
   }
 
   async function enterLeague() {
-    const response = await fetch("/api/submit", { method: "POST" });
+    const policyVersionId = currentUpload?.policyVersionId;
+    if (!policyVersionId) return;
+    const response = await fetch("/api/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ policyVersionId }) });
     const data = await response.json();
     setSubmission(response.ok ? `Entry ${data.id}: ${data.status}` : data.error ?? "Submission failed");
   }
 
   function downloadPolicy() {
-    if (!job.result) return;
-    const url = URL.createObjectURL(new Blob([job.result.source], { type: "text/plain" }));
+    if (!currentRevision) return;
+    const url = URL.createObjectURL(new Blob([currentRevision.source], { type: "text/plain" }));
     const link = document.createElement("a");
     link.href = url;
     link.download = "hero.bas";
@@ -379,7 +309,7 @@ export function StudentApp({ league }: { league: League }) {
   }
 
   function downloadRevision() {
-    const revision = job.result?.revision ?? starterRevision;
+    const revision = currentRevision;
     if (!revision) return;
     const url = URL.createObjectURL(new Blob([JSON.stringify(revision, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
@@ -394,15 +324,17 @@ export function StudentApp({ league }: { league: League }) {
     if (!note) return;
     setAnalysisRequest({
       id: Date.now(),
-      prompt: `I watched this replay and noticed: ${note}\n\n[replay-note:${episode.id}:${episode.run_id}]`,
+      text: `I watched this replay and noticed: ${note}`,
+      context: { kind: "replay-note", xp_request_id: episode.run_id, episode_id: episode.id, hint: "Use coaching_feedback with this episode to read its statistics before responding." },
     });
     setReplayNote("");
   }
 
-  function discussCoaching(item: CoachingSession) {
+  function discussCoaching(item: { id: string }) {
     setAnalysisRequest({
       id: Date.now(),
-      prompt: `Can we talk through what I noticed in this replay?\n\n[coaching-session:${item.id}]`,
+      text: "Can we talk through what I noticed in this replay?",
+      context: { kind: "coaching-session", coaching_session_id: item.id, hint: "Read this coaching session with coaching_feedback first. Start from one observed moment and ask one question." },
     });
   }
 
@@ -410,7 +342,8 @@ export function StudentApp({ league }: { league: League }) {
     if (!latestActiveEpisode || !activePolicyId) return;
     setAnalysisRequest({
       id: Date.now(),
-      prompt: `How is my policy doing? Use the league record and the latest hosted game to suggest one testable improvement. Ask me what I noticed in the replay.\n\n[policy-stats:${activePolicyId}:${latestActiveEpisode.run_id}:${latestActiveEpisode.id}]`,
+      text: "How is my policy doing? Use the league record and the latest hosted game to suggest one testable improvement. Ask me what I noticed in the replay.",
+      context: { kind: "policy-results", policy_version_id: activePolicyId, xp_request_id: latestActiveEpisode.run_id, episode_id: latestActiveEpisode.id, hint: "Use league_standing and coaching_feedback with this episode. State sample sizes and keep league and hosted results separate." },
     });
   }
 
@@ -438,29 +371,38 @@ export function StudentApp({ league }: { league: League }) {
           {error ? <p className="error">{error}</p> : null}
         </form>
       </section> : <div className="workspace">
-        <Chat key={email} onJob={onJob} onSignOut={signOut} analysisRequest={analysisRequest} />
+        <Chat key={email} onActivity={onActivity} onSignOut={signOut} analysisRequest={analysisRequest} recordingCoaching={recordingCoaching} />
         <section className="preview-card">
           <div className="tabs" role="tablist" aria-label="Workspace views">
             <div><button role="tab" aria-selected={activeTab === "episodes"} className={activeTab === "episodes" ? "active" : ""} onClick={() => setActiveTab("episodes")}>Matches</button>
-              <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} onClick={() => setActiveTab("policy")}>Policy <span className="tab-code">hero.bas</span></button></div>
+              <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} disabled={recordingCoaching} onClick={() => setActiveTab("policy")}>Policy <span className="tab-code">hero.bas</span></button></div>
             <span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span>
           </div>
           {activeTab === "policy" ? <div className="policy-view">
-            <div className="policy-toolbar"><div><span className="eyebrow">Symbolic policy</span><h2>hero.bas</h2><p>{job.result ? "Latest hosted policy" : "Starter policy"}</p></div>
-              <div className="policy-actions">{job.result ? <button className="secondary" onClick={downloadPolicy}>BASIC ↓</button> : <a className="secondary" href="/hero.bas" download="hero.bas">BASIC ↓</a>}
-                <button className="secondary" onClick={downloadRevision} disabled={!job.result?.revision && !starterRevision}>IR + BASIC ↓</button>
-                {job.result ? <button className="secondary" onClick={enterLeague}>Enter league ↗</button> : null}</div></div>
+            <div className="policy-toolbar"><div><span className="eyebrow">Symbolic policy</span><h2>hero.bas</h2>
+              <p>{viewRevision !== null ? `Revision ${viewRevision}` : workspace?.latest ? `Revision ${workspace.latest.ir.update.revision} · working copy` : "Starter policy"}{currentUpload?.label ? ` · uploaded as ${currentUpload.label}` : ""}</p></div>
+              <div className="policy-actions">
+                <button className="secondary" onClick={downloadPolicy} disabled={!currentRevision}>BASIC ↓</button>
+                <button className="secondary" onClick={downloadRevision} disabled={!currentRevision}>IR + BASIC ↓</button>
+                {currentUpload ? <button className="secondary" onClick={enterLeague}>Enter league ↗</button> : null}</div></div>
             {submission ? <p className="submission">{submission}</p> : null}
-            {job.result?.revision ?? starterRevision ? <SemanticPolicy key={job.result?.revision?.revisionId ?? "starter"} revision={job.result?.revision ?? starterRevision!} /> : <p className="muted policy-loading">Loading hero.bas…</p>}
+            {workspace?.versions.length ? <ol className="version-history" aria-label="Saved revisions">
+              <li className={viewRevision === null ? "active" : ""}><button type="button" onClick={() => setViewRevision(null)}><b>Latest</b><span>Working copy · r{workspace.latest?.ir.update.revision ?? 0}</span></button></li>
+              {[...workspace.versions].reverse().map((version) => <li key={version.id} className={viewRevision === version.revision ? "active" : ""}>
+                <button type="button" onClick={() => setViewRevision(version.revision)}><b>r{version.revision}</b><span>{version.summary}</span>
+                  <small>{new Date(version.created_at).toLocaleString()}{version.label ? ` · ${version.label}` : " · not uploaded"}{version.scored ? ` · hosted mean ${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(version.hostedMean ?? 0)} over ${version.scored} scored seats` : version.games ? ` · ${version.games} game${version.games === 1 ? "" : "s"} requested` : ""}</small></button>
+              </li>)}
+            </ol> : <p className="muted version-empty">No saved revisions yet. Ask the coach to change something in hero.bas; each save appears here with its hypothesis and results.</p>}
+            {currentRevision ? <SemanticPolicy key={currentRevision.revisionId} revision={currentRevision} /> : <p className="muted policy-loading">Loading hero.bas…</p>}
           </div> : <div className="episodes-view">
             <div className="episodes-heading"><div><img src="/gota/logo.png" alt="" /><div><h2>Matches</h2><p>{episodes.length} hosted games in {league.name}</p></div></div><a className="text-button" href="https://metta-ai.github.io/polyworld-buff/GOTA/players/" target="_blank" rel="noreferrer">Explore player stats ↗</a></div>
-            {job.status !== "idle" && job.status !== "completed" ? <div className="job-banner"><span className="status-dot" />
-              <span>{job.status === "failed" ? "The last policy job failed. Ask the coach to try again." : "Building your policy and requesting a hosted episode…"}</span></div> : null}
+            {pendingExperiments.length ? <div className="job-banner"><span className="status-dot" />
+              <span>{pendingExperiments.length === 1 ? `Hosted game running: ${pendingExperiments[0].title}` : `${pendingExperiments.length} hosted games running`}. Results appear here and in the chat when they finish.</span></div> : null}
             {episodes.length ? <section className="policy-performance" aria-label="Policy performance">
-              <div className="performance-top"><div><span className="eyebrow">Policy performance</span><strong>{boardByPolicy.get(activePolicyId)?.policy_label ?? job.result?.policyLabel ?? (activePolicyId ? `Policy ${activePolicyId.slice(0, 8)}` : "Select a policy")}</strong></div>
-                <select aria-label="Choose policy version" value={selectedPolicyId} onChange={(event) => { setSelectedPolicyId(event.target.value); setSelectedEpisodeId(""); setViewer(null); }}>
+              <div className="performance-top"><div><span className="eyebrow">Policy performance</span><strong>{boardByPolicy.get(activePolicyId)?.policy_label ?? (activePolicyId === latestUpload?.policyVersionId ? latestUpload?.label : undefined) ?? (activePolicyId ? `Policy ${activePolicyId.slice(0, 8)}` : "Select a policy")}</strong></div>
+                <select aria-label="Choose policy version" value={selectedPolicyId} disabled={recordingCoaching} onChange={(event) => { setSelectedPolicyId(event.target.value); setSelectedEpisodeId(""); setViewer(null); }}>
                   <option value="">All matches · latest policy</option>
-                  {[...new Set([job.result?.policyVersionId, ...policyIds].filter((id): id is string => !!id))].map((id) => <option key={id} value={id}>{boardByPolicy.get(id)?.policy_label ?? (id === job.result?.policyVersionId ? job.result.policyLabel : `Policy ${id.slice(0, 8)}`)}</option>)}
+                  {[...new Set([latestUpload?.policyVersionId, ...policyIds].filter((id): id is string => !!id))].map((id) => <option key={id} value={id}>{boardByPolicy.get(id)?.policy_label ?? (id === latestUpload?.policyVersionId ? latestUpload.label : `Policy ${id.slice(0, 8)}`)}</option>)}
                 </select></div>
               <div className="performance-values">
                 <div><strong>{activeStanding ? `${(activeStanding.win_rate * 100).toFixed(1)}%` : "—"}</strong><span>League win % · {activeStanding ? `${activeStanding.wins}/${activeStanding.episodes_played} games` : "No league games in window"}</span></div>
@@ -477,12 +419,11 @@ export function StudentApp({ league }: { league: League }) {
             </section> : null}
             {selectedEpisode ? <section className="replay-panel" aria-label="Selected replay">
               <div className="replay-head"><div><span className="eyebrow">Replay · #{(selectedEpisode.job_index ?? 0) + 1}</span><strong>{selectedEpisode.run_title || "Hosted game"}</strong></div>
-                <button className="text-button" onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div>
-              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready ? <iframe key={viewer.url} className="replay-frame" src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} allow="autoplay; fullscreen" allowFullScreen /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
+                <button className="text-button" disabled={recordingCoaching} onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div>
+              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && selectedEpisode.episode_id ? <ReplayCoaching key={selectedEpisode.id} episode={selectedEpisode} sessions={coaching.filter((item) => item.episode_id === selectedEpisode.episode_id)} onSaved={() => setRefreshKey((key) => key + 1)} onDiscuss={discussCoaching} onRecordingChange={setRecordingCoaching} replay={<iframe key={viewer.url} className="replay-frame" src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} allow="autoplay; fullscreen" allowFullScreen />} /> : viewer?.ready ? <iframe key={viewer.url} className="replay-frame" src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} allow="autoplay; fullscreen" allowFullScreen /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
               <div className="replay-footer">
                 <a href={`https://softmax.com/observatory/v2/episode-requests/${selectedEpisode.id}/watch`} target="_blank" rel="noreferrer">Open on Softmax ↗</a>
-                {coachingAvailable && selectedEpisode.episode_id ? <a href={`https://softmax.com/observatory/v2?tab=overview&detail=episode-coaching:${selectedEpisode.episode_id}`} target="_blank" rel="noreferrer">Coach this replay ↗</a> : null}
-                {selectedCoaching?.latest_analysis?.status === "complete" ? <button className="text-button" onClick={() => discussCoaching(selectedCoaching)}>Discuss coaching ↗</button> : null}
+                {selectedCoaching?.latest_analysis?.status === "complete" && !viewer?.ready ? <button className="text-button" onClick={() => discussCoaching(selectedCoaching)}>Discuss coaching ↗</button> : null}
                 {coachingError ? <span className="error">{coachingError}</span> : null}
               </div>
               {matchStats ? <details className="replay-metrics"><summary>Match statistics <span>{matchStats.steps === null ? "" : `${matchStats.steps} steps`}</span></summary>
@@ -502,7 +443,7 @@ export function StudentApp({ league }: { league: League }) {
                   const score = selectedPolicyId ? policyScore(episode, selectedPolicyId) : episodeScore(episode);
                   const policyId = selectedPolicyId || episodePolicyId(episode);
                   const standing = policyId ? boardByPolicy.get(policyId) : undefined;
-                  return <tr key={episode.id} className={selectedEpisodeId === episode.id ? "selected" : ""} tabIndex={0} role="button" aria-label={`Open replay for ${episode.run_title || "hosted game"}, episode ${(episode.job_index ?? 0) + 1}`} onClick={() => { setSelectedEpisodeId(episode.id); setViewer(null); setReplayError(""); setReplayNote(""); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
+                  return <tr key={episode.id} className={selectedEpisodeId === episode.id ? "selected" : ""} tabIndex={recordingCoaching ? -1 : 0} role="button" aria-disabled={recordingCoaching && selectedEpisodeId !== episode.id} aria-label={`Open replay for ${episode.run_title || "hosted game"}, episode ${(episode.job_index ?? 0) + 1}`} onClick={() => { if (recordingCoaching) return; setSelectedEpisodeId(episode.id); setViewer(null); setReplayError(""); setReplayNote(""); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
                     <td><strong>#{(episode.job_index ?? 0) + 1}</strong><span>{episode.run_title || "Hosted game"}</span></td>
                     <td className="policy-cell" title={standing?.policy_label ?? policyId ?? "Multiple policies"}>{standing?.policy_label ?? (policyId ? `Policy ${policyId.slice(0, 8)}` : "Mixed")}</td>
                     <td>{new Date(episode.completed_at ?? episode.created_at).toLocaleString()}</td>

@@ -1,6 +1,8 @@
 # Student policy project
 
 This repo is for one Gods of the Arena BASIC policy: `hero.bas`. Keep policy changes in that file.
+The web app under `app/`, `components/`, `lib/`, and the eve coach under `agent/` are the hosted harness around it;
+see `README.md` for how the coach, its sandbox, and Supabase fit together.
 
 Read the [policy and host guide](https://softmax.com/gods-of-the-arena/wiki/policy-and-host-surface),
 the [game rules](https://softmax.com/gods-of-the-arena/wiki/overview), and `league.json` before editing.

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { currentSession, sameOrigin, setSessionCookie } from "../../../lib/session";
+import { upsertStudent } from "../../../lib/db";
+import { cookieName, currentSession, sameOrigin, setSessionCookie } from "../../../lib/session";
 import { SoftmaxError, whoami } from "../../../lib/softmax";
 
 export async function GET() {
@@ -19,6 +20,9 @@ export async function POST(request: Request) {
   if (identity.subject_type !== "user") {
     return NextResponse.json({ error: "Use a Softmax user token" }, { status: 403 });
   }
+  // The coach's tools run in a durable session with no request cookie, so the token is kept
+  // sealed in the student's row and looked up by subject ID.
+  await upsertStudent({ subjectId: identity.subject_id, email: identity.user_email, token });
   return setSessionCookie({ email: identity.user_email }, {
     token,
     subjectId: identity.subject_id,
@@ -29,6 +33,6 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
   const response = NextResponse.json({ email: null });
-  response.cookies.delete("student_session");
+  response.cookies.delete(cookieName);
   return response;
 }

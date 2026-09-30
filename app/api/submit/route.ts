@@ -1,19 +1,16 @@
 import { NextResponse } from "next/server";
-import { getRun } from "workflow/api";
+import { z } from "zod";
+import { policyVersionBySoftmaxId } from "../../../lib/db";
 import { currentSession, sameOrigin } from "../../../lib/session";
 import { submitPolicy } from "../../../lib/softmax";
-import type { buildPolicy } from "../../../workflows/build-policy";
 
-type BuildResult = Awaited<ReturnType<typeof buildPolicy>>;
-
+/** Student-initiated league entry for one of their uploaded revisions. */
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
   const session = await currentSession();
-  if (!session?.runId) return NextResponse.json({ error: "Build a policy first" }, { status: 401 });
-  const run = getRun<BuildResult>(session.runId);
-  if ((await run.status) !== "completed") {
-    return NextResponse.json({ error: "Wait for the hosted request to start" }, { status: 409 });
-  }
-  const { policyVersionId } = await run.returnValue;
+  if (!session) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
+  const { policyVersionId } = z.object({ policyVersionId: z.string().min(1) }).parse(await request.json());
+  const version = await policyVersionBySoftmaxId(session.subjectId, policyVersionId);
+  if (!version) return NextResponse.json({ error: "Upload a saved revision before entering the league" }, { status: 404 });
   return NextResponse.json(await submitPolicy(session.token, policyVersionId));
 }

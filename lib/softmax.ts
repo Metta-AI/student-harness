@@ -48,7 +48,7 @@ const episodeSchema = z.object({
 });
 const experiencePageSchema = z.object({ entries: z.array(experienceSchema), next_cursor: z.string().nullable() });
 const experienceDetailSchema = experienceSchema.extend({ episodes: z.array(episodeSchema) });
-const coachingAnalysisSummarySchema = z.object({ id: z.string(), status: z.string() });
+const coachingAnalysisSummarySchema = z.object({ id: z.string(), status: z.string(), phase: z.string().nullable().optional(), error: z.string().nullable().optional() });
 const coachingSessionSchema = z.object({
   id: z.string(), episode_id: z.string(), user_id: z.string(), coworld_name: z.string().nullable(),
   status: z.string(), created_at: z.string(), duration_ms: z.number().nullable(),
@@ -58,7 +58,13 @@ const coachingSessionSchema = z.object({
   }).nullable(),
   policy_reference: z.object({ policy_version_id: z.string().nullable(), slot: z.number().nullable() }),
 });
-const coachingSessionDetailSchema = coachingSessionSchema.extend({ declared_context: z.string() });
+const coachingSessionDetailSchema = coachingSessionSchema.extend({
+  declared_context: z.string(), recording_url: z.string().nullable().optional(),
+  timeline: z.array(z.object({ id: z.string(), kind: z.string(), at_ms: z.number(), payload: z.object({ text: z.string().optional() }).passthrough() })).optional(),
+});
+const coachingCreatedSchema = z.object({
+  id: z.string(), upload: z.object({ url: z.url(), content_type: z.string() }),
+});
 const coachingAnalysisSchema = z.object({
   status: z.string(),
   result: z.object({
@@ -167,6 +173,32 @@ export async function getCoachingAnalysis(token: string, sessionId: string, anal
   return softmax(`/v2/coaching-sessions/${sessionId}/analyses/${analysisId}`, token, coachingAnalysisSchema);
 }
 
+export async function createCoachingSession(token: string, input: {
+  idempotency_key: string; episode_id: string; coworld_id: string;
+  replay_uri: string; declared_context: string;
+}) {
+  return softmax("/v2/coaching-sessions", token, coachingCreatedSchema, {
+    ...input, policy_version_id: null, slot: null,
+  });
+}
+
+export async function appendCoachingEvents(token: string, sessionId: string, events: unknown[]) {
+  return softmax(`/v2/coaching-sessions/${sessionId}/events`, token,
+    z.object({ accepted: z.number(), skipped: z.number() }), { events });
+}
+
+export async function finishCoachingSession(token: string, sessionId: string, input: {
+  duration_ms: number; tick_alignment: "available" | "unavailable";
+  video: { bytes: number; sha256: string; mime: string };
+}) {
+  return softmax(`/v2/coaching-sessions/${sessionId}/finish`, token, coachingSessionDetailSchema, input);
+}
+
+export async function startCoachingAnalysis(token: string, sessionId: string, idempotencyKey: string) {
+  return softmax(`/v2/coaching-sessions/${sessionId}/analyses`, token,
+    z.object({ id: z.string(), status: z.string() }), { idempotency_key: idempotencyKey });
+}
+
 export async function getEpisodeStats(token: string, episodeId: string) {
   return softmax(`/v2/episode-requests/${episodeId}/episode-stats`, token, episodeStatsSchema);
 }
@@ -193,9 +225,9 @@ export async function uploadPolicy(token: string, subjectId: string, source: str
   return softmax("/stats/policies/files/complete", token, policyVersionSchema, body);
 }
 
-export async function requestEpisode(token: string, policyVersionId: string, title: string) {
+export async function requestEpisode(token: string, policyVersionId: string, title: string, idempotencyKey = `neuralhub-${policyVersionId}`) {
   return softmax("/v2/experience-requests", token, xpSchema, {
-    idempotency_key: `neuralhub-${policyVersionId}`,
+    idempotency_key: idempotencyKey,
     target: { league_id: league.id },
     roster: Array.from({ length: 10 }, () => ({ player: { policy_ref: policyVersionId }, slot: -1 })),
     num_episodes: 1,

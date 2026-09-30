@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./styles.css";
 
 export const metadata: Metadata = {
-  title: "NeuralHub Arena",
-  description: "Build and play Gods of the Arena from your browser",
+  title: "Softmax IDE Beta",
+  description: "Build, upload, and play a Gods of the Arena policy with the Coplay Agent",
 };
 
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {

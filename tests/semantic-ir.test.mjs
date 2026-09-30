@@ -78,3 +78,14 @@ test("reconcileSource survives a pure deletion by widening to whole lines", asyn
   assert.ok(rule.source.end > rule.source.start);
   assert.equal(revision.source, next);
 });
+
+test("baselineRevision records the unchanged starter as revision 1", async () => {
+  const { baselineRevision } = await import("../lib/semantic-ir.ts");
+  const parent = importPolicy(starter, true);
+  const baseline = baselineRevision(parent, "Baseline: official starter policy", change.semantic, []);
+  assert.equal(baseline.source, starter);
+  assert.equal(baseline.ir.update.revision, 1);
+  assert.equal(baseline.ir.update.parent, parent.revisionId);
+  assert.notEqual(baseline.revisionId, parent.revisionId);
+  assert.ok(baseline.ir.strategy.every((rule) => rule.source.status === "mapped"));
+});

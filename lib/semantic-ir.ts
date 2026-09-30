@@ -163,3 +163,17 @@ export function reconcileSource(parent: PolicyRevision, nextSource: string, summ
   const after = nextSource.slice(start, newEnd);
   return applySpan(parent, start, oldEnd, after, summary, semanticFieldsSchema.parse(semantic), evidence);
 }
+
+/**
+ * Record the parent's source unchanged as a new revision: the baseline a student uploads before
+ * changing anything. Keeps every source link, bumps the revision, and records the intent.
+ */
+export function baselineRevision(parent: PolicyRevision, summary: string, semantic: SemanticFields, evidence: string[]): PolicyRevision {
+  if (revision(parent.source, parent.ir).revisionId !== parent.revisionId) throw new Error("Parent revision changed since creation");
+  const ir = structuredClone(parent.ir);
+  const n = ir.update.revision + 1;
+  ir.belief.claims[`B_baseline_${n}`] = { claim: semantic.hypothesis, status: "untested", evidence };
+  ir.update = { revision: n, parent: parent.revisionId, change: summary, evidence,
+    research_plan: { hypothesis: semantic.hypothesis, expected: semantic.expected, non_trigger: semantic.non_trigger } };
+  return revision(parent.source, ir);
+}

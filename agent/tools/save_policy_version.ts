@@ -1,12 +1,12 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { insertPolicyVersion, latestPolicyVersion, listExperiments, toRevision } from "../../lib/db";
-import { reconcileSource, semanticFieldsSchema } from "../../lib/semantic-ir";
+import { baselineRevision, reconcileSource, semanticFieldsSchema } from "../../lib/semantic-ir";
 import { requireStudent } from "../lib/student";
 import { commitVersion, starter } from "../lib/workspace";
 
 export default defineTool({
-  description: "Record the current /workspace/hero.bas as the student's next saved policy revision. Call after editing the file. Records the semantic intent (condition, action, goal), a falsifiable hypothesis, and links the changed lines to the revision. Does not upload or play.",
+  description: "Record the current /workspace/hero.bas as the student's next saved policy revision. Call after editing the file, or with the unmodified starter when the student has no revisions yet and wants a baseline. Records the semantic intent (condition, action, goal), a falsifiable hypothesis, and links the changed lines to the revision. Does not upload or play.",
   inputSchema: z.object({
     summary: z.string().min(8).max(200).describe("One line, what changed in gameplay terms."),
     semantic: semanticFieldsSchema,
@@ -20,7 +20,9 @@ export default defineTool({
     if (source === null) throw new Error("/workspace/hero.bas is missing. Restore it from versions/ before saving.");
     const previous = await latestPolicyVersion(student.subjectId);
     const parent = previous ? toRevision(previous) : starter();
-    const revision = reconcileSource(parent, source, summary, semantic, evidence);
+    const revision = !previous && source === parent.source
+      ? baselineRevision(parent, summary, semantic, evidence)
+      : reconcileSource(parent, source, summary, semantic, evidence);
     const row = await insertPolicyVersion({ studentId: student.subjectId, revision, summary, evidence });
     await commitVersion(sandbox, row, await listExperiments(student.subjectId, row.id));
     const rule = revision.ir.strategy.at(-1)!;

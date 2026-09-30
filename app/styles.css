@@ -365,3 +365,26 @@ h1 em { font-style: normal; color: #6b6560; }
 .suggestion:disabled { opacity: .5; cursor: not-allowed; }
 .error-state { flex-direction: column; align-items: flex-start; gap: 8px; }
 .error-state .secondary { font-size: 12px; padding: 6px 10px; }
+.starter-cta { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 10px; padding: 9px 14px; border: 1px solid #171717; border-radius: 8px; background: #171717; color: #fff; font-size: 12.5px; font-weight: 650; }
+.starter-cta:hover { background: #404040; }
+.starter-cta:disabled { opacity: .5; cursor: not-allowed; }
+.chat-empty p b { color: #171717; }
+.chat-empty code { font: 11.5px "Marfa Mono", ui-monospace, Menlo, monospace; background: #f3f1eb; padding: 1px 4px; border-radius: 4px; }
+.chat-empty p { max-width: 300px; }
+.version-empty { margin: 0 0 18px; max-width: 560px; }
+.version-empty p { font-size: 13px; margin: 0 0 8px; }
+.empty-games .starter-cta { margin-top: 10px; }
+
+/* Resizable chat / workspace split */
+.workspace.split { display: flex; grid-template-columns: none; }
+.split-pane { height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.split-pane > .chat-rail, .split-pane > .preview-card { flex: 1; height: 100%; min-height: 0; }
+.split-handle { position: relative; flex: 0 0 8px; margin: 0 -1px; background: transparent; cursor: col-resize; outline: none; z-index: 2; }
+.split-handle::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); background: #e4dac8; transition: width .12s, background .12s; }
+.split-handle:hover::before, .split-handle:focus-visible::before, .split-handle:active::before { width: 3px; background: #171717; }
+.split-pane > .chat-rail { border-right: 0; }
+.workspace.split [data-panel] { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.workspace.split .split-pane { flex: 1; height: auto; }
+.split-pane > .chat-rail { height: auto; }
+.shell.split-shell { height: 100dvh; overflow: hidden; }
+.split-handle { width: 8px; }

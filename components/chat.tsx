@@ -18,7 +18,7 @@ type ChatRow = { session_id: string; title: string | null; updated_at: string };
 const refPattern = /\s*<ref>([\s\S]*?)<\/ref>\s*$/;
 const nextPattern = /\s*<next>([\s\S]*?)<\/next>\s*$/;
 
-/** Serialize a workspace reference into the message so the durable transcript and the coach both carry it. */
+/** Serialize a workspace reference into the message so the durable transcript and the agent both carry it. */
 export function withReference(text: string, reference: ChatReference) {
   return `${text}\n\n<ref>${JSON.stringify(reference)}</ref>`;
 }
@@ -108,19 +108,22 @@ function Message({ message, onRespond, onOpenReference, disabled }: { message: E
     else if (part.type === "dynamic-tool") grouped.push([part]);
     else grouped.push(part);
   }
-  return <article className={`message assistant${message.metadata?.status === "failed" ? " failed" : ""}`}><span className="message-label">Coach</span>
+  return <article className={`message assistant${message.metadata?.status === "failed" ? " failed" : ""}`}><span className="message-label">Coplay Agent</span>
     {grouped.map((entry, index) => Array.isArray(entry)
       ? <div key={index} className="tool-list">{entry.map((part) => part.type === "dynamic-tool" ? <ToolPart key={part.toolCallId} part={part} onRespond={onRespond} disabled={disabled} /> : null)}</div>
       : entry.type === "text" ? (entry.text.replace(nextPattern, "").trim() ? <div key={index} className="message-text"><Markdown>{entry.text.replace(nextPattern, "")}</Markdown></div> : null)
       : entry.type === "authorization" ? <div key={index} className="tool-line"><span className="tool-dot" /><span className="tool-text"><b>{entry.displayName}</b> {entry.description}</span></div> : null)}
-    {message.metadata?.status === "failed" ? <p className="error">The coach could not finish this reply. Send the message again.</p> : null}
+    {message.metadata?.status === "failed" ? <p className="error">The Coplay Agent could not finish this reply. Send the message again.</p> : null}
   </article>;
 }
 
-function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenReference, onArchive, fallbackSuggestions, disabled }: {
+export type StarterPrompt = { label: string; text: string; detail: string };
+
+function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenReference, onArchive, fallbackSuggestions, starterPrompt, disabled }: {
   sessionId: string | null; initialRequest: AnalysisRequest | null;
   onSession: (sessionId: string, title: string) => void; onActivity: (kind: "tool" | "turn") => void;
-  onOpenReference: (reference: ChatReference) => void; onArchive: () => void; fallbackSuggestions: string[]; disabled: boolean;
+  onOpenReference: (reference: ChatReference) => void; onArchive: () => void; fallbackSuggestions: string[];
+  starterPrompt: StarterPrompt | null; disabled: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const firstText = useRef<string>(initialRequest?.text ?? "");
@@ -187,10 +190,14 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
     {threadReference ? <div className="thread-about"><span>About</span><ReferenceChip reference={threadReference} onOpen={onOpenReference} /></div> : null}
     <div className="messages" ref={viewport}>
       {agent.data.messages.length === 0 && agent.status !== "resuming" ? <div className="chat-empty"><span className="chat-empty-icon">✳</span>
-        <p>Describe a strategy, ask about the rules, or bring back what you noticed in a replay.</p></div> : null}
+        {starterPrompt ? <>
+          <p><b>Start with a policy.</b> {starterPrompt.detail}</p>
+          <button type="button" className="starter-cta" disabled={locked} onClick={() => sendSuggestion(starterPrompt.text)}>{starterPrompt.label} ↗</button>
+          <p>Or describe how you want your hero to play and the Coplay Agent turns it into a change to <code>hero.bas</code>.</p>
+        </> : <p>Describe how you want your hero to play, ask for a change to <code>hero.bas</code>, or bring back what you noticed in a replay. The Coplay Agent edits, uploads, and plays hosted games for you.</p>}</div> : null}
       {agent.status === "resuming" ? <p className="muted chat-state">Reopening this conversation…</p> : null}
       {agent.data.messages.map((message) => <Message key={message.id} message={message} onRespond={respond} onOpenReference={onOpenReference} disabled={locked || busy} />)}
-      {busy ? <p className="muted chat-state"><span className="status-dot" /> The coach is working…</p> : null}
+      {busy ? <p className="muted chat-state"><span className="status-dot" /> The Coplay Agent is working…</p> : null}
       {agent.error ? <div className="chat-state error-state">
         <p className="error">{/no longer active|session_not_active|not found/i.test(agent.error.message) ? "This conversation can no longer be continued. Start a new chat; your saved revisions and results are unaffected." : agent.error.message}</p>
         {sessionId && /no longer active|session_not_active|not found/i.test(agent.error.message) ? <button type="button" className="secondary" onClick={onArchive}>Remove from the list</button> : null}
@@ -201,7 +208,7 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
         {suggestions.map((text) => <button key={text} type="button" className="suggestion" disabled={locked} onClick={() => sendSuggestion(text)}>{text}</button>)}
       </div> : null}
       <form className="composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-      <textarea className="composer-input" placeholder="Ask about strategy, or tell the coach what to change…" value={draft} disabled={locked}
+      <textarea className="composer-input" placeholder="Describe a strategy, or tell the Coplay Agent what to change in hero.bas…" value={draft} disabled={locked}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} />
       <div className="composer-footer"><span>{busy ? "Sending now steers the current turn" : "Enter to send · Shift+Enter for a new line"}</span>
@@ -211,9 +218,9 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
   </div>;
 }
 
-export function Chat({ onActivity, onSignOut, onOpenReference, analysisRequest, suggestions, recordingCoaching }: {
+export function Chat({ onActivity, onSignOut, onOpenReference, analysisRequest, suggestions, starterPrompt, recordingCoaching }: {
   onActivity: (kind: "tool" | "turn") => void; onSignOut: () => void; onOpenReference: (reference: ChatReference) => void;
-  analysisRequest: AnalysisRequest | null; suggestions: string[]; recordingCoaching: boolean;
+  analysisRequest: AnalysisRequest | null; suggestions: string[]; starterPrompt: StarterPrompt | null; recordingCoaching: boolean;
 }) {
   const [chats, setChats] = useState<ChatRow[]>([]);
   const [active, setActive] = useState<string | null>(null);
@@ -248,7 +255,7 @@ export function Chat({ onActivity, onSignOut, onOpenReference, analysisRequest, 
   const threadKey = useMemo(() => active ?? `new-${draftKey}`, [active, draftKey]);
 
   return <aside className="chat-rail">
-    <div className="rail-top"><a className="brand" href="/">NEURALHUB <span>×</span> ARENA</a>
+    <div className="rail-top"><a className="brand" href="/">Softmax IDE <span>Beta</span></a>
       <button className="text-button" disabled={recordingCoaching} onClick={onSignOut}>Sign out</button></div>
     <div className="thread-list">
       <div className="thread-list-header"><span>Conversations</span>
@@ -258,9 +265,9 @@ export function Chat({ onActivity, onSignOut, onOpenReference, analysisRequest, 
           <button type="button" className="thread-trigger" onClick={() => { setRequest(null); setActive(chat.session_id); }}>{chat.title || "New chat"}</button>
           <button type="button" className="thread-archive" aria-label="Archive chat" onClick={() => archive(chat.session_id)}>×</button>
         </div>)}
-        {!chats.length ? <p className="muted thread-empty">Your conversations with the coach are saved here.</p> : null}
+        {!chats.length ? <p className="muted thread-empty">Your conversations with the Coplay Agent are saved here.</p> : null}
       </div>
     </div>
-    <Thread key={threadKey} sessionId={active} initialRequest={active ? null : request} onSession={onSession} onActivity={onActivity} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} fallbackSuggestions={suggestions} disabled={recordingCoaching} />
+    <Thread key={threadKey} sessionId={active} initialRequest={active ? null : request} onSession={onSession} onActivity={onActivity} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} />
   </aside>;
 }

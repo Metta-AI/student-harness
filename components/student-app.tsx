@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
 import type { PolicyRevision } from "../lib/semantic-ir";
 import { episodeScore, policyScore } from "../lib/policy-metrics";
 import { SemanticPolicy } from "./semantic-policy";
 import { ReplayCoaching } from "./replay-coaching";
-import { Chat, type AnalysisRequest, type ChatReference } from "./chat";
+import { Chat, type AnalysisRequest, type ChatReference, type StarterPrompt } from "./chat";
 import { ReplayFrame } from "./replay-frame";
 
 type WorkspaceVersion = {
@@ -84,6 +85,21 @@ export function StudentApp({ league }: { league: League }) {
   const [analysisRequest, setAnalysisRequest] = useState<AnalysisRequest | null>(null);
   const [recordingCoaching, setRecordingCoaching] = useState(false);
   const replayPanelRef = useRef<HTMLElement>(null);
+  // Chat / workspace split: remembered per browser, stacked instead of split on narrow screens.
+  const splitKey = "softmax-ide-split";
+  const [splitLayout] = useState<Layout | undefined>(() => {
+    if (typeof window === "undefined") return undefined;
+    try { const raw = window.localStorage.getItem(splitKey); return raw ? (JSON.parse(raw) as Layout) : undefined; } catch { return undefined; }
+  });
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 800px)");
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  const rememberSplit = useCallback((layout: Layout) => { try { window.localStorage.setItem(splitKey, JSON.stringify(layout)); } catch { /* storage unavailable */ } }, []);
   const [focusCoachingId, setFocusCoachingId] = useState<string | undefined>(undefined);
   const openReference = useCallback((reference: ChatReference) => {
     setActiveTab("episodes");
@@ -183,12 +199,17 @@ export function StudentApp({ league }: { league: League }) {
   const currentRevision = viewed?.revision ?? workspace?.latest ?? starterRevision;
   const currentUpload = viewRevision === null ? latestUpload : viewed?.upload ?? null;
   const pendingExperiments = workspace?.experiments.filter((experiment) => experiment.status !== "completed" && experiment.status !== "failed") ?? [];
+  const starterPrompt: StarterPrompt | null = workspace && workspace.versions.length === 0 ? {
+    label: "Create and upload my starter policy",
+    detail: "The official starter hero.bas already plays a full match. Save it as revision 1, upload it to Softmax, and play one hosted game so every later change has a baseline to beat.",
+    text: "Create my first policy: save the official starter hero.bas as revision 1 without changes, upload it to Softmax, and run one baseline hosted game so I have something to compare against. Then propose the first change I could try.",
+  } : null;
   const chatSuggestions = (() => {
     const versions = workspace?.versions ?? [];
-    if (pendingExperiments.length) return ["Check on the running hosted game", "While we wait, what should I watch for in the replay?", "Explain the current policy's retreat logic"];
-    if (!versions.length) return ["Explain how the starter policy plays a match", "Run a baseline hosted game with the starter policy", "What is the league meta right now?"];
-    if (!latestUpload) return ["Upload the latest revision and run one hosted game", "Show me what changed in the latest revision", "What hypothesis is the latest revision testing?"];
-    return ["What do the latest hosted results say?", "Compare my revisions and pick the best one", "Suggest one testable change for the next revision"];
+    if (pendingExperiments.length) return ["Check the running hosted game", "Plan the next change to hero.bas while we wait", "Which part of hero.bas decides when my hero retreats?"];
+    if (!versions.length) return ["Create and upload my starter policy", "Make my hero retreat earlier when its health is low", "Explain what the starter policy does in a team fight"];
+    if (!latestUpload) return ["Upload the latest revision and play one hosted game", "Show me what the latest revision changed in hero.bas", "Change one thing: prioritize towers over kills"];
+    return ["What do the latest hosted results say about my policy?", "Suggest one testable change to hero.bas", "Compare my revisions and keep the best one"];
   })();
 
   const boardByPolicy = new Map(policyStats?.policies.map((policy) => [policy.policy_version_id, policy]));
@@ -383,32 +404,7 @@ export function StudentApp({ league }: { league: League }) {
     });
   }
 
-  return <main className={`shell${email ? " signed-in" : ""}`}>
-    {!email ? <header className="topbar">
-      <a className="brand" href="/">NEURALHUB <span>×</span> GODS OF THE ARENA</a>
-      <a className="league-link" href={`https://softmax.com/observatory/v2?tab=leagues&detail=league:${league.id}`} target="_blank" rel="noreferrer">{league.name} ↗</a>
-    </header> : null}
-    {!email ? <div className="intro">
-      <p className="eyebrow">Diablo Valley College · student arena</p>
-      <h1>Describe your strategy.<br /><em>Watch your hero play.</em></h1>
-      <p>Ask the coach to build a policy. It writes one BASIC file, uploads it, and starts a hosted game for you.</p>
-    </div> : null}
-
-    {email === undefined ? <section className="card">Loading your session…</section> :
-      !email ? <section className="card signin">
-        <div><p className="eyebrow">Step 01</p><h2>Connect your Softmax account</h2>
-          <p>Paste your Softmax user token. We use it to upload and play as you.</p>
-          <a href="https://softmax.com/cli-auth" target="_blank" rel="noreferrer">Get a token from Softmax ↗</a>
-        </div>
-        <form onSubmit={signIn}>
-          <label htmlFor="token">User token</label>
-          <input id="token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} required />
-          <button type="submit">Enter the arena</button>
-          {error ? <p className="error">{error}</p> : null}
-        </form>
-      </section> : <div className="workspace">
-        <Chat key={email} onActivity={onActivity} onSignOut={signOut} onOpenReference={openReference} analysisRequest={analysisRequest} suggestions={chatSuggestions} recordingCoaching={recordingCoaching} />
-        <section className="preview-card">
+  const workspacePanel = <section className="preview-card">
           <div className="tabs" role="tablist" aria-label="Workspace views">
             <div><button role="tab" aria-selected={activeTab === "episodes"} className={activeTab === "episodes" ? "active" : ""} onClick={() => setActiveTab("episodes")}>Matches</button>
               <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} disabled={recordingCoaching} onClick={() => setActiveTab("policy")}>Policy <span className="tab-code">hero.bas</span></button></div>
@@ -428,7 +424,8 @@ export function StudentApp({ league }: { league: League }) {
                 <button type="button" onClick={() => setViewRevision(version.revision)}><b>r{version.revision}</b><span>{version.summary}</span>
                   <small>{new Date(version.created_at).toLocaleString()}{version.label ? ` · ${version.label}` : " · not uploaded"}{version.scored ? ` · hosted mean ${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(version.hostedMean ?? 0)} over ${version.scored} scored seats` : version.games ? ` · ${version.games} game${version.games === 1 ? "" : "s"} requested` : ""}</small></button>
               </li>)}
-            </ol> : <p className="muted version-empty">No saved revisions yet. Ask the coach to change something in hero.bas; each save appears here with its hypothesis and results.</p>}
+            </ol> : <div className="version-empty"><p className="muted">No saved revisions yet. Start by uploading the official starter policy as revision 1, then ask the Coplay Agent for one change at a time. Each save appears here with its hypothesis and results.</p>
+              {starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : null}</div>}
             {currentRevision ? <SemanticPolicy key={currentRevision.revisionId} revision={currentRevision} /> : <p className="muted policy-loading">Loading hero.bas…</p>}
           </div> : <div className="episodes-view">
             <div className="episodes-heading"><div><img src="/gota/logo.png" alt="" /><div><h2>Matches</h2><p>{episodes.length} hosted games in {league.name}</p></div></div><a className="text-button" href="https://metta-ai.github.io/polyworld-buff/GOTA/players/" target="_blank" rel="noreferrer">Explore player stats ↗</a></div>
@@ -475,7 +472,7 @@ export function StudentApp({ league }: { league: League }) {
                   <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Discuss in chat ↗</button></div></div>
             </section> : null}
             {arenaError ? <p className="error">{arenaError}</p> : null}
-            {!arena ? <p className="muted">Loading episodes…</p> : episodes.length === 0 ? <div className="empty-games"><p>No games yet. Ask the coach to build a policy and start one.</p></div> :
+            {!arena ? <p className="muted">Loading episodes…</p> : episodes.length === 0 ? <div className="empty-games"><p>No games yet. Ask the Coplay Agent to upload your policy and start one.</p>{starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : null}</div> :
               <div className="episode-table-wrap"><table className="episode-table"><thead><tr>{tableColumns.map((column) => <th key={column.key} aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" onClick={() => sortBy(column.key)}>{column.label}<span aria-hidden="true">{sort.key === column.key ? sort.direction === "asc" ? " ↑" : " ↓" : " ↕"}</span></button></th>)}</tr></thead><tbody>
                 {sortedEpisodes.map((episode) => {
                   const score = selectedPolicyId ? policyScore(episode, selectedPolicyId) : episodeScore(episode);
@@ -490,7 +487,40 @@ export function StudentApp({ league }: { league: League }) {
                   </tr>;
                 })}</tbody></table>{!sortedEpisodes.length ? <div className="empty-games">No hosted matches for this policy version yet.</div> : null}</div>}
           </div>}
-        </section>
-      </div>}
+        </section>;
+
+  return <main className={`shell${email ? " signed-in" : ""}${email && !narrow ? " split-shell" : ""}`}>
+    {!email ? <header className="topbar">
+      <a className="brand" href="/">Softmax IDE <span>Beta</span></a>
+      <a className="league-link" href={`https://softmax.com/observatory/v2?tab=leagues&detail=league:${league.id}`} target="_blank" rel="noreferrer">{league.name} ↗</a>
+    </header> : null}
+    {!email ? <div className="intro">
+      <p className="eyebrow">Diablo Valley College · student arena</p>
+      <h1>Describe your strategy.<br /><em>Watch your hero play.</em></h1>
+      <p>Ask the Coplay Agent to build a policy. It writes one BASIC file, uploads it, and starts a hosted game for you.</p>
+    </div> : null}
+
+    {email === undefined ? <section className="card">Loading your session…</section> :
+      !email ? <section className="card signin">
+        <div><p className="eyebrow">Step 01</p><h2>Connect your Softmax account</h2>
+          <p>Paste your Softmax user token. We use it to upload and play as you.</p>
+          <a href="https://softmax.com/cli-auth" target="_blank" rel="noreferrer">Get a token from Softmax ↗</a>
+        </div>
+        <form onSubmit={signIn}>
+          <label htmlFor="token">User token</label>
+          <input id="token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} required />
+          <button type="submit">Enter the arena</button>
+          {error ? <p className="error">{error}</p> : null}
+        </form>
+      </section> : narrow ? <div className="workspace">
+        <Chat key={email} onActivity={onActivity} onSignOut={signOut} onOpenReference={openReference} analysisRequest={analysisRequest} suggestions={chatSuggestions} starterPrompt={starterPrompt} recordingCoaching={recordingCoaching} />
+        {workspacePanel}
+      </div> : <Group orientation="horizontal" className="workspace split" defaultLayout={splitLayout} onLayoutChanged={rememberSplit}>
+        <Panel id="chat" className="split-pane" defaultSize="30" minSize={320} maxSize="60">
+          <Chat key={email} onActivity={onActivity} onSignOut={signOut} onOpenReference={openReference} analysisRequest={analysisRequest} suggestions={chatSuggestions} starterPrompt={starterPrompt} recordingCoaching={recordingCoaching} />
+        </Panel>
+        <Separator className="split-handle" aria-label="Resize the chat and workspace panels" />
+        <Panel id="work" className="split-pane" minSize="35">{workspacePanel}</Panel>
+      </Group>}
   </main>;
 }

@@ -70,7 +70,7 @@ export async function requestEpisode(token: string, policyVersionId: string, tit
   return softmax("/v2/experience-requests", token, xpSchema, {
     idempotency_key: `neuralhub-${policyVersionId}`,
     target: { league_id: league.id },
-    roster: [{ player: { policy_ref: policyVersionId }, slot: -1 }],
+    roster: Array.from({ length: 10 }, () => ({ player: { policy_ref: policyVersionId }, slot: -1 })),
     num_episodes: 1,
     title: title.slice(0, 50),
     description: "One hosted self-play episode for the student's policy",

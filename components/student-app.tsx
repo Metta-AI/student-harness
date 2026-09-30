@@ -144,6 +144,8 @@ export function StudentApp({ league }: { league: League }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [starterSource, setStarterSource] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "policy">("overview");
+  const [showAllRuns, setShowAllRuns] = useState(false);
+  const [showAllEpisodes, setShowAllEpisodes] = useState(false);
   const [arena, setArena] = useState<ArenaData | null>(null);
   const [arenaError, setArenaError] = useState("");
   const [coaching, setCoaching] = useState<CoachingSession[]>([]);
@@ -304,61 +306,58 @@ export function StudentApp({ league }: { league: League }) {
       </section> : <div className="workspace">
         <Chat key={email} onJob={onJob} onSignOut={signOut} analysisRequest={analysisRequest} />
         <section className="preview-card">
-          <div className="workspace-topbar"><span>GODS OF THE ARENA</span>
-            <a className="league-link" href={`https://softmax.com/observatory/v2?tab=leagues&detail=league:${league.id}`} target="_blank" rel="noreferrer">{league.name} ↗</a></div>
-          <div className="preview-header">
-            <div><p className="eyebrow">Student workspace</p><h2>Play, review, improve.</h2>
-              <p className="preview-subtitle">Your policy and hosted episodes, all in one place.</p></div>
-            <div className="preview-actions"><a href="https://softmax.com/gods-of-the-arena/wiki/policy-and-host-surface" target="_blank" rel="noreferrer">Policy guide ↗</a>
-              <a href="/hero.bas" download>Starter file ↓</a></div>
-          </div>
           <div className="tabs" role="tablist" aria-label="Workspace views">
-            <button role="tab" aria-selected={activeTab === "overview"} className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>Overview</button>
-            <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} onClick={() => setActiveTab("policy")}>hero.bas</button>
+            <div><button role="tab" aria-selected={activeTab === "overview"} className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>Arena</button>
+              <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} onClick={() => setActiveTab("policy")}>Policy <span className="tab-code">hero.bas</span></button></div>
+            <span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span>
           </div>
           {activeTab === "policy" ? <div className="policy-view">
-            <div className="policy-toolbar"><span className="status-dot" /> <span>{job.result ? "Your latest policy" : "Official starter policy"}</span>
-              {job.result ? <button className="text-button" onClick={downloadPolicy}>Download file ↓</button> : null}</div>
+            <div className="policy-toolbar"><div><span className="eyebrow">02 / Symbolic</span><h2>Policy source</h2><p>{job.result ? "Your latest hosted policy" : "The official starter policy"}</p></div>
+              {job.result ? <button className="secondary" onClick={downloadPolicy}>Download hero.bas ↓</button> : <a className="secondary" href="/hero.bas" download="hero.bas">Download hero.bas ↓</a>}</div>
             <pre className="policy-code"><code>{job.result?.source ?? starterSource ?? "Loading hero.bas…"}</code></pre>
           </div> : <div className="overview">
-            <section className="league-panel">
-              <div className="panel-title"><div><p className="eyebrow">Live league</p><h3>{arena?.league.name ?? league.name}</h3></div>
-                <span className={`live-pill ${arena?.league.rounds_paused_at ? "paused" : ""}`}><span />{arena ? arena.league.rounds_paused_at ? "Paused" : "Live" : "Loading"}</span></div>
-              <p>{arena?.league.description ?? "Loading league status…"}</p>
-              <div className="league-facts"><div><span>Rounds</span><strong>{arena ? arena.league.rounds_paused_at ? "Paused" : "Running" : "—"}</strong></div>
-                <div><span>Entries</span><strong>{arena ? arena.league.submissions_locked_at ? "Closed" : "Open" : "—"}</strong></div>
-                <div><span>Ladder</span><strong>{arena ? arena.league.settings.ladder.enabled ? "On" : "Off" : "—"}</strong></div></div>
-              {job.status !== "idle" ? <div className="job-banner"><span className="status-dot" />
-                <span>{job.status === "completed" ? job.result?.summary : job.status === "failed" ? "The last policy job failed. Ask the coach to try again." : "The cloud agent is building your policy and requesting a hosted episode."}</span></div> : null}
-              {job.result ? <div className="league-actions"><button className="secondary" onClick={enterLeague}>Enter the league ↗</button>
-                {submission ? <span className="submission">{submission}</span> : null}</div> : null}
+            <section className="arena-hero">
+              <div className="hero-copy"><p className="eyebrow">01 / Semantic <span>→</span> 02 / Symbolic <span>→</span> 03 / Replay</p>
+                <h2>Ideas become<br /><em>arena moves.</em></h2>
+                <p>Shape a strategy in chat. Watch it play. Bring the replay back to improve it.</p>
+                <div className="hero-actions">
+                  {job.result ? <button className="primary-action" onClick={enterLeague}>Enter the league ↗</button> : <button className="primary-action" onClick={() => setActiveTab("policy")}>Explore the policy ↗</button>}
+                  <a href={`https://softmax.com/observatory/v2?tab=leagues&detail=league:${league.id}`} target="_blank" rel="noreferrer">View league ↗</a>
+                </div>
+              </div>
+              <div className="hero-art"><div className="art-grid" aria-hidden="true" /><img className="gota-logo" src="/gota/logo.png" alt="Gods of the Arena" />
+                <div className="hero-portraits" aria-hidden="true"><img src="/gota/vanguard-knight.png" alt="" /><img src="/gota/warlock.png" alt="" /><img src="/gota/druid-warden.png" alt="" /></div></div>
             </section>
+            {job.status !== "idle" ? <div className="job-banner"><span className="status-dot" />
+              <span>{job.status === "completed" ? job.result?.summary : job.status === "failed" ? "The last policy job failed. Ask the coach to try again." : "The cloud agent is building your policy and requesting a hosted episode."}</span></div> : null}
+            {submission ? <p className="submission">{submission}</p> : null}
             <section className="episodes-panel">
-              <div className="panel-title"><div><p className="eyebrow">Your hosted games</p><h3>Recorded episodes</h3></div>
-                <span className="sync-label">Updates every 15s</span></div>
+              <div className="panel-title"><div><p className="eyebrow">03 / Replay</p><h3>Games</h3></div><span className="sync-label">Updates every 15s</span></div>
               {arenaError ? <p className="error">{arenaError}</p> : null}
               {!arena ? <p className="muted">Loading your games…</p> : arena.experiences.length === 0 ?
-                <p className="muted">No hosted games yet. Ask the coach to build a policy to start one.</p> :
+                <div className="empty-games"><span>◈</span><p>No games yet. Ask the coach to build a policy and start one.</p></div> :
                 <div className="run-layout"><div className="run-list" aria-label="Hosted runs">
-                  {arena.experiences.map((run) => <button key={run.id} className={`run-row ${selectedRun === run.id ? "selected" : ""}`} onClick={() => { setSelectedRun(run.id); setRunDetail(null); setSelectedEpisodeId(""); setReplayNote(""); }}>
+                  {arena.experiences.slice(0, showAllRuns ? undefined : 4).map((run) => <button key={run.id} className={`run-row ${selectedRun === run.id ? "selected" : ""}`} onClick={() => { setSelectedRun(run.id); setRunDetail(null); setSelectedEpisodeId(""); setReplayNote(""); setShowAllEpisodes(false); }}>
                     <span><strong>{run.title || `Hosted run · ${new Date(run.created_at).toLocaleDateString()}`}</strong>
                       <small>{new Date(run.created_at).toLocaleString()} · {run.completed_count}/{run.episode_count} complete</small></span>
                     <span className={`run-status ${run.status}`}>{run.status}</span>
-                  </button>)}</div>
+                  </button>)}
+                  {arena.experiences.length > 4 ? <button className="show-more" onClick={() => setShowAllRuns(!showAllRuns)}>{showAllRuns ? "Show recent games ↑" : `All ${arena.experiences.length} games ↓`}</button> : null}</div>
                   <div className="run-detail">
                     {!runDetail || runDetail.id !== selectedRun ? <p className="muted">Loading episodes…</p> : <>
                       <div className="run-detail-head"><div><strong>{runDetail.completed_count} of {runDetail.episode_count} completed</strong>
                         <p>{runDetail.failed_count ? `${runDetail.failed_count} failed · ` : ""}Run {runDetail.status}</p></div>
-                        <a href={`https://softmax.com/observatory/v2?tab=experience-requests&detail=experience-request:${selectedRun}`} target="_blank" rel="noreferrer">Open on Softmax ↗</a></div>
-                      <div className="episode-list">{runDetail.episodes.map((episode) => <div className="episode-row" key={episode.id}>
+                        <a href={`https://softmax.com/observatory/v2?tab=experience-requests&detail=experience-request:${selectedRun}`} target="_blank" rel="noreferrer">Run details ↗</a></div>
+                      <div className="episode-list">{runDetail.episodes.slice().reverse().slice(0, showAllEpisodes ? undefined : 3).map((episode) => <div className="episode-row" key={episode.id}>
                         <div className="episode-main"><span className="episode-index">#{(episode.job_index ?? 0) + 1}</span>
-                          <span><strong>{episode.status === "completed" ? "Episode recorded" : `Episode ${episode.status}`}</strong>
+                          <span><strong>{episode.status === "completed" ? "Replay ready" : `Episode ${episode.status}`}</strong>
                             <small>{episode.completed_at ? new Date(episode.completed_at).toLocaleString() : episode.error ?? "Waiting for the hosted game"}</small></span></div>
                         <div className="episode-actions">
                           {episode.episode_id && episode.replay_url ? <a className="coach-replay-link" href={coachingAvailable ? `https://softmax.com/observatory/v2?tab=overview&detail=episode-coaching:${episode.episode_id}` : `https://softmax.com/observatory/v2?tab=overview&detail=episode-request:${episode.id}`} target="_blank" rel="noreferrer">{coachingAvailable ? "Watch & coach ↗" : "Watch replay ↗"}</a> : null}
                           {coachingAvailable === false && episode.status === "completed" ? <button onClick={() => { setSelectedEpisodeId(episode.id); setReplayNote(""); }}>Add a note</button> : null}
                         </div>
                       </div>)}</div>
+                      {runDetail.episodes.length > 3 ? <button className="show-more" onClick={() => setShowAllEpisodes(!showAllEpisodes)}>{showAllEpisodes ? "Show fewer episodes ↑" : `All ${runDetail.episodes.length} episodes ↓`}</button> : null}
                     </>}
                   </div></div>}
               {coachingAvailable === false && selectedEpisode ? <div className="replay-note-box">
@@ -369,11 +368,10 @@ export function StudentApp({ league }: { league: League }) {
               </div> : null}
             </section>
             {coachingAvailable ? <section className="coaching-panel">
-              <div className="panel-title"><div><p className="eyebrow">Your replay feedback</p><h3>Coaching sessions</h3></div>
-                <a href="https://softmax.com/observatory/coaching-sessions" target="_blank" rel="noreferrer">All sessions ↗</a></div>
-              <p className="coaching-intro">Watch a hosted replay, narrate or mark the moments that matter, then bring the feedback here to discuss your next policy change.</p>
+              <div className="panel-title"><div><p className="eyebrow">Feedback → next move</p><h3>Replay notes</h3></div>
+                <a href="https://softmax.com/observatory/coaching-sessions" target="_blank" rel="noreferrer">All coaching ↗</a></div>
               {coachingError ? <p className="error">{coachingError}</p> : null}
-              {coaching.length ? <div className="coaching-list">{coaching.slice(0, 5).map((item) => <div className="coaching-row" key={item.id}>
+              {coaching.length ? <div className="coaching-list">{coaching.slice(0, 2).map((item) => <div className="coaching-row" key={item.id}>
                 <div><span className="coaching-date">{new Date(item.created_at).toLocaleString()} · {item.latest_analysis?.status === "complete" ? "Feedback ready" : item.latest_analysis?.status ?? item.status}</span>
                   <strong>{item.feed?.summary || "Replay coaching session"}</strong>
                   {item.feed?.insights[0] ? <p>{item.feed.insights[0]}</p> : null}</div>

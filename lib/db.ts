@@ -115,14 +115,14 @@ const episodeSummary = z.object({
   completed_at: z.string().nullable(), error: z.string().nullable(),
 });
 const experimentRow = z.object({
-  id: z.string(), student_id: z.string(), policy_version_id: z.string(), xp_request_id: z.string(), title: z.string(),
+  id: z.string(), student_id: z.string(), policy_version_id: z.string().nullable(), xp_request_id: z.string(), title: z.string(),
   hypothesis: z.string().nullable(), status: z.string(), episodes: z.array(episodeSummary),
   summary: z.unknown().nullable(), created_at: z.string(), completed_at: z.string().nullable(),
 });
 export type ExperimentRow = z.infer<typeof experimentRow>;
 export type EpisodeSummary = z.infer<typeof episodeSummary>;
 
-export async function insertExperiment(input: { studentId: string; policyVersionRowId: string; xpRequestId: string; title: string; hypothesis?: string; status: string }): Promise<ExperimentRow> {
+export async function insertExperiment(input: { studentId: string; policyVersionRowId: string | null; xpRequestId: string; title: string; hypothesis?: string; status: string }): Promise<ExperimentRow> {
   const row = must(await db().from("experiments").upsert({
     student_id: input.studentId, policy_version_id: input.policyVersionRowId, xp_request_id: input.xpRequestId,
     title: input.title, hypothesis: input.hypothesis ?? null, status: input.status,

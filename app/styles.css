@@ -310,3 +310,14 @@ h1 em { font-style: normal; color: #6b6560; }
 .replay-frame-wrap .replay-frame { display: block; }
 .replay-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; font-size: 13px; color: #d6d3d1; background: #141414e6; }
 .replay-overlay.error { color: #f3c1c1; }
+
+/* Full-screen replay coaching */
+.replay-head-actions { display: inline-flex; gap: 16px; align-items: center; flex: none; }
+.replay-panel:fullscreen { display: flex; flex-direction: column; margin: 0; border: 0; border-radius: 0; background: #fffaf0; overflow: auto; }
+.replay-panel:fullscreen .coaching-workspace, .replay-panel:fullscreen > .replay-frame-wrap { flex: 1; min-height: 0; }
+.replay-panel:fullscreen .coaching-workspace { grid-template-columns: minmax(0, 1fr) minmax(300px, 24vw); }
+.replay-panel:fullscreen .coaching-capture { display: flex; flex-direction: column; min-height: 0; }
+.replay-panel:fullscreen .coaching-capture .replay-frame-wrap { flex: 1; display: flex; flex-direction: column; }
+.replay-panel:fullscreen .replay-frame { flex: 1; height: auto; min-height: 60vh; }
+.replay-panel:fullscreen .coaching-widget { overflow-y: auto; }
+.replay-panel:fullscreen .replay-footer, .replay-panel:fullscreen .replay-metrics, .replay-panel:fullscreen .replay-note-box { flex: none; }

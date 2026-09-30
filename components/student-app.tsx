@@ -83,6 +83,19 @@ export function StudentApp({ league }: { league: League }) {
   const [matchStatsError, setMatchStatsError] = useState("");
   const [analysisRequest, setAnalysisRequest] = useState<AnalysisRequest | null>(null);
   const [recordingCoaching, setRecordingCoaching] = useState(false);
+  const replayPanelRef = useRef<HTMLElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === replayPanelRef.current && replayPanelRef.current !== null);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggleFullscreen = useCallback(() => {
+    const panel = replayPanelRef.current;
+    if (!panel) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void panel.requestFullscreen({ navigationUI: "hide" }).catch(() => undefined);
+  }, []);
   const [workspaceKey, setWorkspaceKey] = useState(0);
   // Tool results refresh the workspace panel; a finished turn also refreshes the arena feeds.
   const onActivity = useCallback((kind: "tool" | "turn") => {
@@ -418,9 +431,11 @@ export function StudentApp({ league }: { league: League }) {
               {policyStatsError ? <p className="error">{policyStatsError}</p> : null}
               {snapshotError ? <p className="error">{snapshotError}</p> : null}
             </section> : null}
-            {selectedEpisode ? <section className="replay-panel" aria-label="Selected replay">
+            {selectedEpisode ? <section ref={replayPanelRef} className="replay-panel" aria-label="Selected replay">
               <div className="replay-head"><div><span className="eyebrow">Replay · #{(selectedEpisode.job_index ?? 0) + 1}</span><strong>{selectedEpisode.run_title || "Hosted game"}</strong></div>
-                <button className="text-button" disabled={recordingCoaching} onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div>
+                <div className="replay-head-actions">
+                  <button className="text-button" onClick={toggleFullscreen} aria-pressed={fullscreen}>{fullscreen ? "Exit full screen" : "Full screen ⤢"}</button>
+                  <button className="text-button" disabled={recordingCoaching} onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div></div>
               {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && selectedEpisode.episode_id ? <ReplayCoaching key={selectedEpisode.id} episode={selectedEpisode} sessions={coaching.filter((item) => item.episode_id === selectedEpisode.episode_id)} onSaved={() => setRefreshKey((key) => key + 1)} onDiscuss={discussCoaching} onRecordingChange={setRecordingCoaching} replay={<ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} />} /> : viewer?.ready ? <ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
               <div className="replay-footer">
                 <a href={`https://softmax.com/observatory/v2/episode-requests/${selectedEpisode.id}/watch`} target="_blank" rel="noreferrer">Open on Softmax ↗</a>

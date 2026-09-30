@@ -446,7 +446,7 @@ export function StudentApp({ league }: { league: League }) {
                 <button type="button" onClick={() => { setViewRevision(version.revision); track(events.revisionViewed, { revision: version.revision, uploaded: !!version.policyVersionId, games: version.games }); }}><b>r{version.revision}</b><span>{version.summary}</span>
                   <small>{new Date(version.created_at).toLocaleString()}{version.label ? ` · ${version.label}` : " · not uploaded"}{version.scored ? ` · hosted mean ${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(version.hostedMean ?? 0)} over ${version.scored} scored seats` : version.games ? ` · ${version.games} game${version.games === 1 ? "" : "s"} requested` : ""}</small></button>
               </li>)}
-            </ol> : <div className="version-empty"><p className="muted">No saved revisions yet. Start by uploading the official starter policy as revision 1, then ask the Coplay Agent for one change at a time. Each save appears here with its hypothesis and results.</p>
+            </ol> : <div className="version-empty"><p className="muted">No saved revisions yet. Start by uploading the official starter policy as revision 1, then ask the Neural Viking Agent for one change at a time. Each save appears here with its hypothesis and results.</p>
               {starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : null}</div>}
             {currentRevision ? <SemanticPolicy key={currentRevision.revisionId} revision={currentRevision} /> : <p className="muted policy-loading">Loading hero.bas…</p>}
           </div> : <div className="episodes-view">
@@ -494,7 +494,7 @@ export function StudentApp({ league }: { league: League }) {
                   <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Discuss in chat ↗</button></div></div> : null}
             </section> : null}
             {arenaError ? <p className="error">{arenaError}</p> : null}
-            {!arena ? <p className="muted">Loading episodes…</p> : episodes.length === 0 ? <div className="empty-games"><p>No games yet. Ask the Coplay Agent to upload your policy and start one.</p>{starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : null}</div> :
+            {!arena ? <p className="muted">Loading episodes…</p> : episodes.length === 0 ? <div className="empty-games"><p>No games yet. Ask the Neural Viking Agent to upload your policy and start one.</p>{starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : null}</div> :
               <div className="episode-table-wrap"><table className="episode-table"><thead><tr>{tableColumns.map((column) => <th key={column.key} aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" onClick={() => sortBy(column.key)}>{column.label}<span aria-hidden="true">{sort.key === column.key ? sort.direction === "asc" ? " ↑" : " ↓" : " ↕"}</span></button></th>)}</tr></thead><tbody>
                 {sortedEpisodes.map((episode) => {
                   const score = selectedPolicyId ? policyScore(episode, selectedPolicyId) : episodeScore(episode);
@@ -519,7 +519,7 @@ export function StudentApp({ league }: { league: League }) {
     {!email ? <div className="intro">
       <p className="eyebrow">Diablo Valley College · student arena</p>
       <h1>Describe your strategy.<br /><em>Watch your hero play.</em></h1>
-      <p>Ask the Coplay Agent to build a policy. It writes one BASIC file, uploads it, and starts a hosted game for you.</p>
+      <p>Ask the Neural Viking Agent to build a policy. It writes one BASIC file, uploads it, and starts a hosted game for you.</p>
     </div> : null}
 
     {email === undefined ? <section className="card">Loading your session…</section> :

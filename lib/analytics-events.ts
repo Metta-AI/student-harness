@@ -7,7 +7,7 @@ export const events = {
   // Session
   signedIn: "signed_in",
   signedOut: "signed_out",
-  // Chat with the Coplay Agent
+  // Chat with the Neural Viking Agent
   chatStarted: "chat_started",
   chatMessageSent: "chat_message_sent",
   suggestionClicked: "suggestion_clicked",

@@ -110,12 +110,12 @@ function Message({ message, onRespond, onOpenReference, disabled }: { message: E
     else if (part.type === "dynamic-tool") grouped.push([part]);
     else grouped.push(part);
   }
-  return <article className={`message assistant${message.metadata?.status === "failed" ? " failed" : ""}`}><span className="message-label">Coplay Agent</span>
+  return <article className={`message assistant${message.metadata?.status === "failed" ? " failed" : ""}`}><span className="message-label">Neural Viking Agent</span>
     {grouped.map((entry, index) => Array.isArray(entry)
       ? <div key={index} className="tool-list">{entry.map((part) => part.type === "dynamic-tool" ? <ToolPart key={part.toolCallId} part={part} onRespond={onRespond} disabled={disabled} /> : null)}</div>
       : entry.type === "text" ? (entry.text.replace(nextPattern, "").trim() ? <div key={index} className="message-text"><Markdown>{entry.text.replace(nextPattern, "")}</Markdown></div> : null)
       : entry.type === "authorization" ? <div key={index} className="tool-line"><span className="tool-dot" /><span className="tool-text"><b>{entry.displayName}</b> {entry.description}</span></div> : null)}
-    {message.metadata?.status === "failed" ? <p className="error">The Coplay Agent could not finish this reply. Send the message again.</p> : null}
+    {message.metadata?.status === "failed" ? <p className="error">The Neural Viking Agent could not finish this reply. Send the message again.</p> : null}
   </article>;
 }
 
@@ -212,11 +212,11 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
         {starterPrompt ? <>
           <p><b>Start with a policy.</b> {starterPrompt.detail}</p>
           <button type="button" className="starter-cta" disabled={locked} onClick={() => sendSuggestion(starterPrompt.text, "starter_cta")}>{starterPrompt.label} ↗</button>
-          <p>Or describe how you want your hero to play and the Coplay Agent turns it into a change to <code>hero.bas</code>.</p>
-        </> : <p>Describe how you want your hero to play, ask for a change to <code>hero.bas</code>, or bring back what you noticed in a replay. The Coplay Agent edits, uploads, and plays hosted games for you.</p>}</div> : null}
+          <p>Or describe how you want your hero to play and the Neural Viking Agent turns it into a change to <code>hero.bas</code>.</p>
+        </> : <p>Describe how you want your hero to play, ask for a change to <code>hero.bas</code>, or bring back what you noticed in a replay. The Neural Viking Agent edits, uploads, and plays hosted games for you.</p>}</div> : null}
       {agent.status === "resuming" ? <p className="muted chat-state">Reopening this conversation…</p> : null}
       {agent.data.messages.map((message) => <Message key={message.id} message={message} onRespond={respond} onOpenReference={onOpenReference} disabled={locked || busy} />)}
-      {busy ? <p className="muted chat-state"><span className="status-dot" /> The Coplay Agent is working…</p> : null}
+      {busy ? <p className="muted chat-state"><span className="status-dot" /> The Neural Viking Agent is working…</p> : null}
       {agent.error ? <div className="chat-state error-state">
         <p className="error">{/no longer active|session_not_active|not found/i.test(agent.error.message) ? "This conversation can no longer be continued. Start a new chat; your saved revisions and results are unaffected." : agent.error.message}</p>
         {sessionId && /no longer active|session_not_active|not found/i.test(agent.error.message) ? <button type="button" className="secondary" onClick={onArchive}>Remove from the list</button> : null}
@@ -227,7 +227,7 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
         {suggestions.map(({ text, origin }) => <button key={text} type="button" className="suggestion" disabled={locked} onClick={() => sendSuggestion(text, origin)}>{text}</button>)}
       </div> : null}
       <form className="composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-      <textarea className="composer-input" placeholder="Describe a strategy, or tell the Coplay Agent what to change in hero.bas…" value={draft} disabled={locked}
+      <textarea className="composer-input" placeholder="Describe a strategy, or tell the Neural Viking Agent what to change in hero.bas…" value={draft} disabled={locked}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} />
       <div className="composer-footer"><span>{busy ? "Sending now steers the current turn" : "Enter to send · Shift+Enter for a new line"}</span>
@@ -284,7 +284,7 @@ export function Chat({ onActivity, onSignOut, onOpenReference, analysisRequest, 
           <button type="button" className="thread-trigger" onClick={() => { setRequest(null); setActive(chat.session_id); }}>{chat.title || "New chat"}</button>
           <button type="button" className="thread-archive" aria-label="Archive chat" onClick={() => archive(chat.session_id)}>×</button>
         </div>)}
-        {!chats.length ? <p className="muted thread-empty">Your conversations with the Coplay Agent are saved here.</p> : null}
+        {!chats.length ? <p className="muted thread-empty">Your conversations with the Neural Viking Agent are saved here.</p> : null}
       </div>
     </div>
     <Thread key={threadKey} sessionId={active} initialRequest={active ? null : request} onSession={onSession} onActivity={onActivity} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} />

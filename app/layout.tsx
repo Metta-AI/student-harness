@@ -3,7 +3,7 @@ import "./styles.css";
 
 export const metadata: Metadata = {
   title: "Softmax IDE Beta",
-  description: "Build, upload, and play a Gods of the Arena policy with the Coplay Agent",
+  description: "Build, upload, and play a Gods of the Arena policy with the Neural Viking Agent",
 };
 
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {

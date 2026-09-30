@@ -6,6 +6,7 @@ import { z } from "zod";
 import { currentSession, sameOrigin, seal, setSessionCookie } from "../../../lib/session";
 import { getCoachingAnalysis, getCoachingSession, getEpisodeStats, getExperience } from "../../../lib/softmax";
 import league from "../../../league.json";
+import type { PolicyRevision } from "../../../lib/semantic-ir";
 import { buildPolicy } from "../../../workflows/build-policy";
 
 const messagesSchema = z.array(z.object({
@@ -66,18 +67,23 @@ export async function POST(request: Request) {
     });
   }
 
-  if (/^(please\s+)?(build|create|make|edit|improve|update|write)\b|^can you\s+(build|create|make|edit|improve|update|write)\b/i.test(latest.text.trim())) {
-    let previousSource: string | undefined;
-    if (session.runId) {
-      const previous = getRun<BuildResult>(session.runId);
-      const status = await previous.status;
-      if (status === "running" || status === "pending") {
-        return NextResponse.json({ message: "Your previous policy job is still running. I’ll use its result for the next change." });
-      }
-      if (status === "completed") previousSource = (await previous.returnValue).source;
+  let previousSource: string | undefined;
+  let previousRevision: PolicyRevision | undefined;
+  if (session.runId) {
+    const previous = getRun<BuildResult>(session.runId);
+    const status = await previous.status;
+    if (status === "completed") {
+      const result = await previous.returnValue;
+      previousSource = result.source;
+      previousRevision = result.revision;
     }
+    if ((status === "running" || status === "pending") && /^(please\s+)?(build|create|make|edit|improve|update|write)\b|^can you\s+(build|create|make|edit|improve|update|write)\b/i.test(latest.text.trim())) {
+      return NextResponse.json({ message: "Your previous policy job is still running. I’ll use its result for the next change." });
+    }
+  }
+  if (/^(please\s+)?(build|create|make|edit|improve|update|write)\b|^can you\s+(build|create|make|edit|improve|update|write)\b/i.test(latest.text.trim())) {
     const task = `${latest.text}${coachingContext ? `\n\nReplay coaching evidence and proposed changes (not yet applied): ${coachingContext}` : ""}${replayContext ? `\n\nStudent's replay observation and episode results: ${replayContext}` : ""}`;
-    const run = await start(buildPolicy, [seal(session), task, previousSource]);
+    const run = await start(buildPolicy, [seal(session), task, previousRevision, previousSource]);
     return setSessionCookie({
       message: "I’m editing your policy, then I’ll upload it and request one hosted game. You can close this tab; progress will be here when you return.",
       runId: run.runId,
@@ -90,6 +96,8 @@ export async function POST(request: Request) {
 The policy is one BASIC file. The student can ask you to build or improve it; that starts a hosted job.
 Explain game strategy using https://softmax.com/gods-of-the-arena/wiki/policy-and-host-surface.
 Never claim a policy has been tested or submitted unless the web app shows a completed job.
+The IDE tracks an intent description linked to BASIC source. Source links are checked, but behavioral fidelity and performance are unverified until reviewed separately.
+${previousRevision ? `Current semantic intent and revision evidence: ${JSON.stringify({ rules: previousRevision.ir.strategy.map(({ id, intent, source }) => ({ id, intent, status: source.status })), update: previousRevision.ir.update, receipts: previousRevision.receipts })}` : ""}
 ${coachingContext ? `The student has already watched and coached a replay. Here is their saved coaching analysis: ${coachingContext}
 Talk through what they noticed. Begin with one specific observed moment or proposal and one natural question. Use recording seconds when useful. Do not dump the full report. Separate observations from hypotheses. Do not claim you watched the replay yourself.` : ""}
 ${replayContext ? `The student watched a replay and wrote an observation. Here is that note with the episode results: ${replayContext}

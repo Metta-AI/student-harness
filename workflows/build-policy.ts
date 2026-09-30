@@ -2,36 +2,29 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Output, ToolLoopAgent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { z } from "zod";
 import { unseal } from "../lib/session";
 import { requestEpisode, uploadPolicy } from "../lib/softmax";
+import { importPolicy, reconcilePolicy, semanticChangeSchema, type PolicyRevision } from "../lib/semantic-ir";
 
-const editSchema = z.object({
-  before: z.string().min(8),
-  after: z.string().min(8),
-  summary: z.string().min(8).max(200),
-});
-
-async function editPolicy(request: string, previousSource?: string) {
+async function editPolicy(request: string, previousRevision?: PolicyRevision, previousSource?: string) {
   "use step";
-  const source = previousSource ?? (await readFile(join(process.cwd(), "hero.bas"), "utf8"));
+  const parent = previousRevision ?? importPolicy(previousSource ?? await readFile(join(process.cwd(), "hero.bas"), "utf8"), !previousSource);
   const agent = new ToolLoopAgent({
     model: anthropic("claude-sonnet-5-5"),
-    output: Output.object({ schema: editSchema }),
+    output: Output.object({ schema: semanticChangeSchema }),
     instructions: `You improve a Gods of the Arena policy written in Polyworld BASIC.
-Make one focused gameplay change. Return an exact substring from the source as "before" and its replacement as "after".
-The substring must occur exactly once. Preserve the rest of the file. Do not use Python, Nim, external imports, or
-functions absent from the source or the public policy guide. Treat replay coaching as an observation, especially when
-its coached policy is unbound or differs from this file. Keep the policy under 64 KiB. Explain the change briefly.`,
+Make one focused gameplay change. Return an exact, unique substring as "before" and its replacement as "after".
+Also return the semantic condition, action, goal, falsifiable hypothesis, expected behavior and a non-trigger case.
+The semantic fields describe the change you actually made, not a wish list. Preserve the rest of the file.
+Do not use Python, Nim, external imports, or functions absent from the source or public policy guide.
+Treat replay coaching as an observation, especially when its coached policy differs from this file.
+Do not claim the behavior or competitive result has been verified. Keep the policy under 64 KiB.`,
   });
   const result = await agent.generate({
-    prompt: `Student request: ${request}\n\nCurrent hero.bas:\n${source}`,
+    prompt: `Student request and any replay evidence: ${request}\n\nCurrent semantic IR (source mappings may be stale; source is authoritative for execution):\n${JSON.stringify(parent.ir)}\n\nCurrent hero.bas:\n${parent.source}`,
   });
-  const { before, after, summary } = result.output;
-  if (source.split(before).length !== 2) throw new Error("Agent edit did not match exactly one section of hero.bas");
-  const edited = source.replace(before, after);
-  if (Buffer.byteLength(edited, "utf8") > 64 * 1024) throw new Error("Edited policy exceeds the 64 KiB source limit");
-  return { source: edited, summary };
+  const evidence = [...request.matchAll(/\[(coaching-session:csn_[0-9a-f-]{36}|replay-note:ereq_[0-9a-f-]{36}:xreq_[0-9a-f-]{36})\]/g)].map((match) => match[1]);
+  return { revision: reconcilePolicy(parent, result.output, evidence), summary: result.output.summary };
 }
 
 async function upload(sessionCipher: string, source: string, summary: string) {
@@ -46,14 +39,15 @@ async function requestHostedEpisode(sessionCipher: string, policyVersionId: stri
   return requestEpisode(session.token, policyVersionId, summary);
 }
 
-export async function buildPolicy(sessionCipher: string, request: string, previousSource?: string) {
+export async function buildPolicy(sessionCipher: string, request: string, previousRevision?: PolicyRevision, previousSource?: string) {
   "use workflow";
-  const { source, summary } = await editPolicy(request, previousSource);
-  const policy = await upload(sessionCipher, source, summary);
+  const { revision, summary } = await editPolicy(request, previousRevision, previousSource);
+  const policy = await upload(sessionCipher, revision.source, summary);
   const experience = await requestHostedEpisode(sessionCipher, policy.id, summary);
   return {
-    source,
+    source: revision.source,
     summary,
+    revision,
     policyVersionId: policy.id,
     policyLabel: `${policy.name}:v${policy.version}`,
     xpRequestId: experience.id,

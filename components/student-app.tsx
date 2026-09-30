@@ -14,11 +14,14 @@ import {
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PolicyRevision } from "../lib/semantic-ir";
+import { SemanticPolicy } from "./semantic-policy";
 
 type Job = {
   status: string;
   result?: {
     source: string;
+    revision: PolicyRevision;
     summary: string;
     policyVersionId: string;
     policyLabel: string;
@@ -136,7 +139,7 @@ export function StudentApp({ league }: { league: League }) {
   const [job, setJob] = useState<Job>({ status: "idle" });
   const [submission, setSubmission] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [starterSource, setStarterSource] = useState("");
+  const [starterRevision, setStarterRevision] = useState<PolicyRevision | null>(null);
   const [activeTab, setActiveTab] = useState<"episodes" | "policy">("episodes");
   const [arena, setArena] = useState<ArenaData | null>(null);
   const [arenaError, setArenaError] = useState("");
@@ -153,7 +156,7 @@ export function StudentApp({ league }: { league: League }) {
 
   useEffect(() => {
     fetch("/api/session").then((response) => response.json()).then((data) => setEmail(data.email));
-    fetch("/hero.bas").then((response) => response.text()).then(setStarterSource);
+    fetch("/api/starter-policy").then((response) => response.json()).then(setStarterRevision);
   }, []);
 
   useEffect(() => {
@@ -268,6 +271,17 @@ export function StudentApp({ league }: { league: League }) {
     URL.revokeObjectURL(url);
   }
 
+  function downloadRevision() {
+    const revision = job.result?.revision ?? starterRevision;
+    if (!revision) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(revision, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `hero-revision-${revision.ir.update.revision}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function discussReplay(episode: ArenaEpisode) {
     const note = replayNote.trim();
     if (!note) return;
@@ -318,10 +332,11 @@ export function StudentApp({ league }: { league: League }) {
           </div>
           {activeTab === "policy" ? <div className="policy-view">
             <div className="policy-toolbar"><div><span className="eyebrow">Symbolic policy</span><h2>hero.bas</h2><p>{job.result ? "Latest hosted policy" : "Starter policy"}</p></div>
-              <div className="policy-actions">{job.result ? <button className="secondary" onClick={downloadPolicy}>Download ↓</button> : <a className="secondary" href="/hero.bas" download="hero.bas">Download ↓</a>}
+              <div className="policy-actions">{job.result ? <button className="secondary" onClick={downloadPolicy}>BASIC ↓</button> : <a className="secondary" href="/hero.bas" download="hero.bas">BASIC ↓</a>}
+                <button className="secondary" onClick={downloadRevision} disabled={!job.result?.revision && !starterRevision}>IR + BASIC ↓</button>
                 {job.result ? <button className="secondary" onClick={enterLeague}>Enter league ↗</button> : null}</div></div>
             {submission ? <p className="submission">{submission}</p> : null}
-            <pre className="policy-code"><code>{job.result?.source ?? starterSource ?? "Loading hero.bas…"}</code></pre>
+            {job.result?.revision ?? starterRevision ? <SemanticPolicy key={job.result?.revision?.revisionId ?? "starter"} revision={job.result?.revision ?? starterRevision!} /> : <p className="muted policy-loading">Loading hero.bas…</p>}
           </div> : <div className="episodes-view">
             <div className="episodes-heading"><div><img src="/gota/logo.png" alt="" /><div><h2>Episodes</h2><p>{episodes.length} games played in {league.name}</p></div></div><span className="sync-label">Updates every 30s</span></div>
             {job.status !== "idle" && job.status !== "completed" ? <div className="job-banner"><span className="status-dot" />

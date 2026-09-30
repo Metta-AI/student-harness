@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import league from "../league.json";
+import league from "../league.json" with { type: "json" };
 
 const api = process.env.SOFTMAX_API_URL ?? "https://softmax.com/api";
 
@@ -8,6 +8,7 @@ const whoamiSchema = z.object({
   subject_id: z.string(),
   subject_type: z.string(),
   user_email: z.email(),
+  name: z.string().nullable().optional(),
 });
 
 const uploadSchema = z.object({
@@ -89,8 +90,10 @@ const episodeStatsSchema = z.object({
 });
 
 export class SoftmaxError extends Error {
-  constructor(public status: number, path: string, detail: string) {
+  status: number;
+  constructor(status: number, path: string, detail: string) {
     super(`Softmax ${path} returned ${status}: ${detail}`);
+    this.status = status;
   }
 }
 
@@ -228,7 +231,15 @@ export async function uploadPolicy(token: string, subjectId: string, source: str
     size_bytes: bytes.length,
     tags: { title: title.slice(0, 50), description: "Student policy edited in NeuralHub harness" },
   };
-  const upload = await softmax("/stats/policies/files/upload", token, uploadSchema, body);
+  // The object store is content-addressed across policy names. A 409 means the bytes
+  // are already present; /complete creates or reuses this student's policy version.
+  let upload: z.infer<typeof uploadSchema>;
+  try {
+    upload = await softmax("/stats/policies/files/upload", token, uploadSchema, body);
+  } catch (error) {
+    if (!(error instanceof SoftmaxError && error.status === 409)) throw error;
+    upload = { upload_url: null };
+  }
   if (upload.upload_url) {
     const put = await fetch(upload.upload_url, {
       method: "PUT",

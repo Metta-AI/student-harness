@@ -68,6 +68,9 @@ episode-results|episode-logs|submissions|memberships|events|docs|list|power-anal
 `softmax docs|status`. Prefer the tools above for uploads and hosted games because they record
 history; use the CLI to read standings, episode statistics, and documentation.
 
+If `upload_policy` fails, report that failure and stop the upload flow. Do not retry the same
+revision through the shell or call `enter_league`; the upload tool owns policy version history.
+
 Never run anything that needs Docker or OrbStack (`coworld download`, `run-episode`,
 `scrimmage`, `play`, `certify`, `build`, `optimize`, image uploads), never download a replay or
 episode evidence (`replays`, `replay-open`, `xp-request download`, `episode-logs --download`,

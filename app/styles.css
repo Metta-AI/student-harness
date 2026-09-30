@@ -155,10 +155,10 @@ h1 em { font-style: normal; color: #6b6560; }
 .replay-note-box > div { display: flex; align-items: flex-end; gap: 8px; }
 .replay-note-box textarea { flex: 1; min-height: 52px; max-height: 100px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: #fffdf4; font-size: 12px; }
 .replay-note-box button:disabled { opacity: .45; cursor: not-allowed; }
-.coaching-workspace { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, .8fr); background: #fffdf4; }
+.coaching-workspace { display: flex; flex-direction: column; background: #fffdf4; }
 .coaching-capture { background: #171717; }
 .coaching-capture .replay-frame { height: clamp(360px, 40vw, 550px); }
-.coaching-widget { padding: 16px; min-width: 0; border-left: 1px solid var(--line); }
+.coaching-widget { padding: 20px 24px 8px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 20px 36px; }
 .coaching-widget-head, .coaching-review-head, .coaching-control-row, .coaching-note > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .coaching-widget-head strong { display: block; font-size: 16px; }
 .coaching-widget-head .eyebrow { margin-bottom: 3px; }
@@ -178,11 +178,14 @@ h1 em { font-style: normal; color: #6b6560; }
 .coaching-marks li { margin: 5px 0; }
 .coaching-marks time, .coaching-saved-notes time { color: #8b5e42; font-family: "Marfa Mono", monospace; }
 .coaching-status, .coaching-error { margin-top: 12px; }
-.coaching-review { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.coaching-review { min-width: 0; }
 .coaching-review-head { flex-wrap: wrap; }
-.coaching-review-head strong { font-size: 12px; }
+.coaching-review-head strong { display: block; font-size: 14px; font-weight: 600; }
+.coaching-review-head .eyebrow { margin-bottom: 3px; }
 .coaching-review-head select { max-width: 100%; border: 1px solid var(--line); border-radius: 5px; background: #fff; padding: 6px; font-size: 11px; }
-.coaching-video { display: block; width: min(100%, 520px); max-height: 290px; margin-top: 14px; background: #111; }
+.coaching-review-body { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(200px, .8fr); gap: 16px; margin-top: 12px; align-items: start; }
+.coaching-video { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: 320px; background: #111; border-radius: 6px; }
+.coaching-video.placeholder { display: flex; align-items: center; justify-content: center; color: #a8a29e; font-size: 12px; background: #1c1917; }
 .coaching-saved-notes { margin-top: 14px; }
 .coaching-saved-notes p { margin: 7px 0; font-size: 12px; }
 .coaching-analysis { margin-top: 16px; }
@@ -194,7 +197,7 @@ h1 em { font-style: normal; color: #6b6560; }
 .coaching-analysis article span { font-size: 11px; }
 .coaching-analysis > button { margin-top: 10px; }
 @media (max-width: 1100px) {
-  .coaching-workspace { grid-template-columns: 1fr; }
+  .coaching-widget, .coaching-review-body { grid-template-columns: 1fr; }
   .coaching-widget { border-left: 0; border-top: 1px solid var(--line); }
 }
 .secondary { display: inline-block; border: 1px solid #d4c9b5; border-radius: 5px; color: #1a3875; background: #fffdf4; padding: 7px 10px; font-size: 11px; white-space: nowrap; }
@@ -315,9 +318,50 @@ h1 em { font-style: normal; color: #6b6560; }
 .replay-head-actions { display: inline-flex; gap: 16px; align-items: center; flex: none; }
 .replay-panel:fullscreen { display: flex; flex-direction: column; margin: 0; border: 0; border-radius: 0; background: #fffaf0; overflow: auto; }
 .replay-panel:fullscreen .coaching-workspace, .replay-panel:fullscreen > .replay-frame-wrap { flex: 1; min-height: 0; }
-.replay-panel:fullscreen .coaching-workspace { grid-template-columns: minmax(0, 1fr) minmax(300px, 24vw); }
 .replay-panel:fullscreen .coaching-capture { display: flex; flex-direction: column; min-height: 0; }
 .replay-panel:fullscreen .coaching-capture .replay-frame-wrap { flex: 1; display: flex; flex-direction: column; }
 .replay-panel:fullscreen .replay-frame { flex: 1; height: auto; min-height: 60vh; }
 .replay-panel:fullscreen .coaching-widget { overflow-y: auto; }
 .replay-panel:fullscreen .replay-footer, .replay-panel:fullscreen .replay-metrics, .replay-panel:fullscreen .replay-note-box { flex: none; }
+
+/* Coaching panel: record, sessions, analysis */
+.coaching-record { min-width: 0; }
+.coaching-saved-notes ol { list-style: none; margin: 6px 0 0; padding: 0; }
+.coaching-saved-notes li { display: grid; grid-template-columns: 40px 1fr; gap: 8px; font-size: 12px; line-height: 1.45; padding: 5px 0; border-top: 1px solid #efe9dc; }
+.coaching-saved-notes li:first-child { border-top: 0; }
+.coaching-saved-notes p.muted { margin: 6px 0 0; font-size: 12px; }
+.coaching-analysis { grid-column: 1 / -1; padding: 18px 0 14px; border-top: 1px solid var(--line); }
+.coaching-analysis-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.coaching-analysis-head strong { display: block; font-size: 15px; font-weight: 600; }
+.coaching-analysis-head .eyebrow { margin-bottom: 3px; }
+.coaching-summary { max-width: 72ch; margin: 12px 0 0 !important; font-size: 13px !important; line-height: 1.55 !important; color: var(--ink) !important; }
+.coaching-proposals { list-style: none; margin: 14px 0 0; padding: 0; column-width: 320px; column-gap: 32px; }
+.coaching-proposals li { display: grid; grid-template-columns: 26px 1fr; gap: 10px; break-inside: avoid; margin-bottom: 16px; }
+.proposal-index { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font: 600 11px "Marfa Mono", monospace; color: var(--muted); }
+.proposal-body small { display: block; color: #945637; font: 10px "Marfa Mono", monospace; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 3px; }
+.proposal-body strong { display: block; font-size: 13px; font-weight: 600; line-height: 1.4; }
+.proposal-body p { margin: 5px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.proposal-body span { display: block; margin-top: 5px; font-size: 11.5px; color: #57534e; }
+.replay-panel:fullscreen .coaching-workspace { display: flex; }
+
+/* Chat: compact activity list, references, suggestions */
+.tool-list { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 6px; }
+.tool-line { display: grid; grid-template-columns: 10px minmax(0, 1fr); align-items: center; column-gap: 8px; font-size: 12px; color: #6b6560; padding: 2px 0; }
+.tool-dot { width: 6px; height: 6px; margin-left: 2px; border-radius: 50%; background: #c9c1b2; transform: none; }
+.tool-text { display: flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; overflow: hidden; }
+.tool-text b { flex: none; font-weight: 600; color: #44403c; }
+.tool-text code { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px "Marfa Mono", ui-monospace, Menlo, monospace; color: #78716c; }
+.tool-error { grid-column: 2; font-style: normal; color: #9c2929; font-size: 12px; line-height: 1.4; white-space: normal; }
+.tool-approve { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 2px; color: #44403c; white-space: normal; }
+.ref-chip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; margin-top: 8px; padding: 5px 9px; border: 1px solid #ddd5c6; border-radius: 999px; background: #fffaf0; color: #171717; font-size: 11.5px; line-height: 1.2; cursor: pointer; }
+.ref-chip:hover { border-color: #171717; }
+.ref-kind { color: #945637; font: 600 10px "Marfa Mono", monospace; letter-spacing: .06em; text-transform: uppercase; flex: none; }
+.ref-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-about { display: flex; align-items: center; gap: 10px; padding: 10px 18px 0; font-size: 11px; color: #8a8580; }
+.thread-about .ref-chip { margin-top: 0; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.suggestion { border: 1px solid #ddd5c6; border-radius: 999px; background: #fff; color: #44403c; font-size: 11.5px; padding: 5px 10px; text-align: left; }
+.suggestion:hover { border-color: #171717; color: #171717; }
+.suggestion:disabled { opacity: .5; cursor: not-allowed; }
+.error-state { flex-direction: column; align-items: flex-start; gap: 8px; }
+.error-state .secondary { font-size: 12px; padding: 6px 10px; }

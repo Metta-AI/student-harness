@@ -5,10 +5,12 @@ import { currentSession, sameOrigin } from "../../../lib/session";
 
 const sessionId = z.string().min(4).max(128);
 
-export async function GET() {
+const hostOf = (request: Request) => request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? new URL(request.url).host;
+
+export async function GET(request: Request) {
   const session = await currentSession();
   if (!session) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
-  return NextResponse.json({ chats: await listChatSessions(session.subjectId) });
+  return NextResponse.json({ chats: await listChatSessions(session.subjectId, hostOf(request)) });
 }
 
 /** Record a durable coach session so the student can reopen it later. */
@@ -17,7 +19,7 @@ export async function POST(request: Request) {
   const session = await currentSession();
   if (!session) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
   const body = z.object({ sessionId, title: z.string().max(80).optional() }).parse(await request.json());
-  return NextResponse.json({ chat: await upsertChatSession({ studentId: session.subjectId, sessionId: body.sessionId, title: body.title }) });
+  return NextResponse.json({ chat: await upsertChatSession({ studentId: session.subjectId, sessionId: body.sessionId, title: body.title, host: hostOf(request) }) });
 }
 
 export async function DELETE(request: Request) {

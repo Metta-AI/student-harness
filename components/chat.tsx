@@ -4,8 +4,56 @@ import { useEveAgent, type EveMessage, type EveMessagePart } from "eve/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 
-export type AnalysisRequest = { id: number; text: string; context?: Record<string, string> };
+export type ChatReference = {
+  kind: "coaching-session" | "replay-note" | "policy-results";
+  label: string;
+  episodeId: string;
+  runId: string;
+  coachingSessionId?: string;
+  policyVersionId?: string;
+};
+export type AnalysisRequest = { id: number; text: string; context?: Record<string, string>; reference?: ChatReference };
 type ChatRow = { session_id: string; title: string | null; updated_at: string };
+
+const refPattern = /\s*<ref>([\s\S]*?)<\/ref>\s*$/;
+const nextPattern = /\s*<next>([\s\S]*?)<\/next>\s*$/;
+
+/** Serialize a workspace reference into the message so the durable transcript and the coach both carry it. */
+export function withReference(text: string, reference: ChatReference) {
+  return `${text}\n\n<ref>${JSON.stringify(reference)}</ref>`;
+}
+
+function parseReference(text: string): ChatReference | null {
+  const match = refPattern.exec(text);
+  if (!match) return null;
+  try {
+    const value = JSON.parse(match[1]) as Partial<ChatReference>;
+    if (!value.kind || !value.label || !value.episodeId || !value.runId) return null;
+    return value as ChatReference;
+  } catch {
+    return null;
+  }
+}
+
+function parseSuggestions(text: string): string[] {
+  const match = nextPattern.exec(text);
+  if (!match) return [];
+  try {
+    const value = JSON.parse(match[1]) as unknown;
+    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 4);
+  } catch {
+    return match[1].split("\n").map((line) => line.replace(/^[-*\d.\s]+/, "").trim()).filter(Boolean).slice(0, 4);
+  }
+  return [];
+}
+
+const referenceKindLabel: Record<ChatReference["kind"], string> = { "coaching-session": "Coaching session", "replay-note": "Replay note", "policy-results": "Policy results" };
+
+function ReferenceChip({ reference, onOpen }: { reference: ChatReference; onOpen: (reference: ChatReference) => void }) {
+  return <button type="button" className="ref-chip" onClick={() => onOpen(reference)} title="Open in the workspace">
+    <span className="ref-kind">{referenceKindLabel[reference.kind]}</span><span className="ref-label">{reference.label}</span><span aria-hidden="true">↗</span>
+  </button>;
+}
 
 const toolLabels: Record<string, string> = {
   bash: "Ran a shell command", read_file: "Read a file", write_file: "Wrote a file", glob: "Listed files", grep: "Searched files",
@@ -31,9 +79,10 @@ function ToolPart({ part, onRespond, disabled }: { part: Extract<EveMessagePart,
   const request = part.toolMetadata?.eve?.inputRequest;
   const pending = part.state === "approval-requested" && request;
   const status = part.state === "output-error" ? "failed" : part.state === "output-denied" ? "declined" : part.state === "output-available" ? "done" : part.state === "approval-requested" ? "needs approval" : "running";
-  return <div className={`tool-line ${status.replace(" ", "-")}`}>
+  return <div className={`tool-line ${status.replace(" ", "-")}`} title={detail || base}>
     <span className="tool-dot" aria-hidden="true" />
-    <span className="tool-text"><b>{base}</b>{detail ? <code>{detail}</code> : null}{part.state === "output-error" ? <em>{part.errorText}</em> : null}</span>
+    <span className="tool-text"><b>{base}</b>{detail ? <code>{detail}</code> : null}</span>
+    {part.state === "output-error" ? <em className="tool-error">{part.errorText}</em> : null}
     {pending ? <span className="tool-approve">
       <span>{request.prompt}</span>
       {(request.options ?? [{ id: "approve", label: "Approve" }, { id: "deny", label: "Decline" }]).map((option) => <button key={option.id} type="button" disabled={disabled} className={option.style === "danger" ? "secondary" : ""} onClick={() => onRespond(request.requestId, option.id)}>{option.label}</button>)}
@@ -41,24 +90,37 @@ function ToolPart({ part, onRespond, disabled }: { part: Extract<EveMessagePart,
   </div>;
 }
 
-function Message({ message, onRespond, disabled }: { message: EveMessage; onRespond: (requestId: string, optionId: string) => void; disabled: boolean }) {
+function Message({ message, onRespond, onOpenReference, disabled }: { message: EveMessage; onRespond: (requestId: string, optionId: string) => void; onOpenReference: (reference: ChatReference) => void; disabled: boolean }) {
   const parts = message.parts.filter((part) => part.type === "text" || part.type === "dynamic-tool" || part.type === "authorization");
   if (!parts.length) return null;
   if (message.role === "user") {
+    const text = message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+    const reference = parseReference(text);
     return <article className="message user"><span className="message-label">You</span>
-      <p>{message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n")}</p></article>;
+      <p>{text.replace(refPattern, "")}</p>
+      {reference ? <ReferenceChip reference={reference} onOpen={onOpenReference} /> : null}</article>;
+  }
+  // Group consecutive tool parts so activity reads as one compact list.
+  const grouped: (EveMessagePart | EveMessagePart[])[] = [];
+  for (const part of parts) {
+    const last = grouped.at(-1);
+    if (part.type === "dynamic-tool" && Array.isArray(last)) last.push(part);
+    else if (part.type === "dynamic-tool") grouped.push([part]);
+    else grouped.push(part);
   }
   return <article className={`message assistant${message.metadata?.status === "failed" ? " failed" : ""}`}><span className="message-label">Coach</span>
-    {parts.map((part, index) => part.type === "text" ? (part.text.trim() ? <div key={index} className="message-text"><Markdown>{part.text}</Markdown></div> : null)
-      : part.type === "dynamic-tool" ? <ToolPart key={part.toolCallId} part={part} onRespond={onRespond} disabled={disabled} />
-      : <div key={index} className="tool-line"><span className="tool-dot" /><span className="tool-text"><b>{part.displayName}</b> {part.description}</span></div>)}
+    {grouped.map((entry, index) => Array.isArray(entry)
+      ? <div key={index} className="tool-list">{entry.map((part) => part.type === "dynamic-tool" ? <ToolPart key={part.toolCallId} part={part} onRespond={onRespond} disabled={disabled} /> : null)}</div>
+      : entry.type === "text" ? (entry.text.replace(nextPattern, "").trim() ? <div key={index} className="message-text"><Markdown>{entry.text.replace(nextPattern, "")}</Markdown></div> : null)
+      : entry.type === "authorization" ? <div key={index} className="tool-line"><span className="tool-dot" /><span className="tool-text"><b>{entry.displayName}</b> {entry.description}</span></div> : null)}
     {message.metadata?.status === "failed" ? <p className="error">The coach could not finish this reply. Send the message again.</p> : null}
   </article>;
 }
 
-function Thread({ sessionId, initialRequest, onSession, onActivity, disabled }: {
+function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenReference, onArchive, fallbackSuggestions, disabled }: {
   sessionId: string | null; initialRequest: AnalysisRequest | null;
-  onSession: (sessionId: string, title: string) => void; onActivity: (kind: "tool" | "turn") => void; disabled: boolean;
+  onSession: (sessionId: string, title: string) => void; onActivity: (kind: "tool" | "turn") => void;
+  onOpenReference: (reference: ChatReference) => void; onArchive: () => void; fallbackSuggestions: string[]; disabled: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const firstText = useRef<string>(initialRequest?.text ?? "");
@@ -80,7 +142,8 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, disabled }: 
   useEffect(() => {
     if (!initialRequest || started.current) return;
     started.current = true;
-    void agent.send(initialRequest.text, initialRequest.context ? { clientContext: initialRequest.context } : undefined);
+    const text = initialRequest.reference ? withReference(initialRequest.text, initialRequest.reference) : initialRequest.text;
+    void agent.send(text, initialRequest.context ? { clientContext: initialRequest.context } : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialRequest]);
 
@@ -98,16 +161,46 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, disabled }: 
     void agent.respond([{ requestId, optionId }]);
   }, [agent]);
 
+  const sendSuggestion = useCallback((text: string) => {
+    if (locked || busy) return;
+    if (!firstText.current) firstText.current = text;
+    void agent.send(text);
+  }, [agent, busy, locked]);
+
+  const messages = agent.data.messages;
+  const threadReference = useMemo(() => {
+    for (const message of messages) {
+      if (message.role !== "user") continue;
+      const reference = parseReference(message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n"));
+      if (reference) return reference;
+    }
+    return null;
+  }, [messages]);
+  const suggestions = useMemo(() => {
+    if (busy || agent.status === "resuming") return [];
+    const last = [...messages].reverse().find((message) => message.role === "assistant");
+    const fromCoach = last ? parseSuggestions(last.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n")) : [];
+    return fromCoach.length ? fromCoach : fallbackSuggestions;
+  }, [agent.status, busy, fallbackSuggestions, messages]);
+
   return <div className="thread">
+    {threadReference ? <div className="thread-about"><span>About</span><ReferenceChip reference={threadReference} onOpen={onOpenReference} /></div> : null}
     <div className="messages" ref={viewport}>
       {agent.data.messages.length === 0 && agent.status !== "resuming" ? <div className="chat-empty"><span className="chat-empty-icon">✳</span>
         <p>Describe a strategy, ask about the rules, or bring back what you noticed in a replay.</p></div> : null}
       {agent.status === "resuming" ? <p className="muted chat-state">Reopening this conversation…</p> : null}
-      {agent.data.messages.map((message) => <Message key={message.id} message={message} onRespond={respond} disabled={locked || busy} />)}
+      {agent.data.messages.map((message) => <Message key={message.id} message={message} onRespond={respond} onOpenReference={onOpenReference} disabled={locked || busy} />)}
       {busy ? <p className="muted chat-state"><span className="status-dot" /> The coach is working…</p> : null}
-      {agent.error ? <p className="error chat-state">{agent.error.message}</p> : null}
+      {agent.error ? <div className="chat-state error-state">
+        <p className="error">{/no longer active|session_not_active|not found/i.test(agent.error.message) ? "This conversation can no longer be continued. Start a new chat; your saved revisions and results are unaffected." : agent.error.message}</p>
+        {sessionId && /no longer active|session_not_active|not found/i.test(agent.error.message) ? <button type="button" className="secondary" onClick={onArchive}>Remove from the list</button> : null}
+      </div> : null}
     </div>
-    <div className="composer-wrap"><form className="composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+    <div className="composer-wrap">
+      {suggestions.length ? <div className="suggestions" aria-label="Suggested next asks">
+        {suggestions.map((text) => <button key={text} type="button" className="suggestion" disabled={locked} onClick={() => sendSuggestion(text)}>{text}</button>)}
+      </div> : null}
+      <form className="composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
       <textarea className="composer-input" placeholder="Ask about strategy, or tell the coach what to change…" value={draft} disabled={locked}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} />
@@ -118,8 +211,9 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, disabled }: 
   </div>;
 }
 
-export function Chat({ onActivity, onSignOut, analysisRequest, recordingCoaching }: {
-  onActivity: (kind: "tool" | "turn") => void; onSignOut: () => void; analysisRequest: AnalysisRequest | null; recordingCoaching: boolean;
+export function Chat({ onActivity, onSignOut, onOpenReference, analysisRequest, suggestions, recordingCoaching }: {
+  onActivity: (kind: "tool" | "turn") => void; onSignOut: () => void; onOpenReference: (reference: ChatReference) => void;
+  analysisRequest: AnalysisRequest | null; suggestions: string[]; recordingCoaching: boolean;
 }) {
   const [chats, setChats] = useState<ChatRow[]>([]);
   const [active, setActive] = useState<string | null>(null);
@@ -167,6 +261,6 @@ export function Chat({ onActivity, onSignOut, analysisRequest, recordingCoaching
         {!chats.length ? <p className="muted thread-empty">Your conversations with the coach are saved here.</p> : null}
       </div>
     </div>
-    <Thread key={threadKey} sessionId={active} initialRequest={active ? null : request} onSession={onSession} onActivity={onActivity} disabled={recordingCoaching} />
+    <Thread key={threadKey} sessionId={active} initialRequest={active ? null : request} onSession={onSession} onActivity={onActivity} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} fallbackSuggestions={suggestions} disabled={recordingCoaching} />
   </aside>;
 }

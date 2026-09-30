@@ -149,20 +149,20 @@ export async function experimentByXp(studentId: string, xpRequestId: string): Pr
 
 // ---------- chat sessions ----------
 
-const chatRow = z.object({ session_id: z.string(), student_id: z.string(), title: z.string().nullable(), created_at: z.string(), updated_at: z.string(), archived_at: z.string().nullable() });
+const chatRow = z.object({ session_id: z.string(), student_id: z.string(), title: z.string().nullable(), host: z.string().nullable(), created_at: z.string(), updated_at: z.string(), archived_at: z.string().nullable() });
 export type ChatSessionRow = z.infer<typeof chatRow>;
 
-export async function listChatSessions(studentId: string): Promise<ChatSessionRow[]> {
-  const rows = must(await db().from("chat_sessions").select("*").eq("student_id", studentId).is("archived_at", null).order("updated_at", { ascending: false }).limit(50), "list chats");
+export async function listChatSessions(studentId: string, host: string): Promise<ChatSessionRow[]> {
+  const rows = must(await db().from("chat_sessions").select("*").eq("student_id", studentId).eq("host", host).is("archived_at", null).order("updated_at", { ascending: false }).limit(50), "list chats");
   return z.array(chatRow).parse(rows);
 }
 
-export async function upsertChatSession(input: { studentId: string; sessionId: string; title?: string }): Promise<ChatSessionRow> {
+export async function upsertChatSession(input: { studentId: string; sessionId: string; title?: string; host: string }): Promise<ChatSessionRow> {
   const existing = await db().from("chat_sessions").select("*").eq("session_id", input.sessionId).maybeSingle();
   if (existing.error) throw new Error(`load chat: ${existing.error.message}`);
   if (existing.data && existing.data.student_id !== input.studentId) throw new Error("This chat belongs to another student");
   const row = must(await db().from("chat_sessions").upsert({
-    session_id: input.sessionId, student_id: input.studentId,
+    session_id: input.sessionId, student_id: input.studentId, host: input.host,
     title: input.title ?? existing.data?.title ?? null, updated_at: new Date().toISOString(),
   }, { onConflict: "session_id" }).select("*").single(), "upsert chat");
   return chatRow.parse(row);

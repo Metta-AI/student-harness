@@ -29,7 +29,11 @@ async function uploadRecording(url: string, contentType: string, blob: Blob, pro
     upload.setRequestHeader("Content-Type", contentType);
     upload.upload.onprogress = (event) => { if (event.lengthComputable) progress(Math.round(event.loaded / event.total * 100)); };
     upload.onload = () => upload.status >= 200 && upload.status < 300 ? resolve() : reject(new Error(`Recording upload failed (${upload.status})`));
-    upload.onerror = () => reject(new Error("Recording upload lost its connection"));
+    // A status of 0 with no response means the browser refused the request before sending it,
+    // which for a presigned S3 PUT is almost always a bucket CORS policy missing this origin.
+    upload.onerror = () => reject(new Error(upload.status === 0
+      ? `The recording storage did not accept uploads from ${window.location.origin}. The Softmax coaching bucket's CORS policy must allow this origin.`
+      : "Recording upload lost its connection"));
     upload.send(blob);
   });
 }

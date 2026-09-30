@@ -43,6 +43,7 @@ export function ReplayCoaching({ episode, sessions, replay, onSaved, onDiscuss, 
   onDiscuss: (session: Summary) => void; onRecordingChange: (recording: boolean) => void; focusSessionId?: string;
 }) {
   const captureRef = useRef<HTMLDivElement>(null);
+  const recordingRef = useRef<HTMLVideoElement>(null);
   const activeRef = useRef<Active | null>(null);
   const unsavedRef = useRef<Unsaved | null>(null);
   const [selectedId, setSelectedId] = useState(focusSessionId && sessions.some((item) => item.id === focusSessionId) ? focusSessionId : sessions[0]?.id ?? "");
@@ -210,7 +211,7 @@ export function ReplayCoaching({ episode, sessions, replay, onSaved, onDiscuss, 
             {sessionOptions.map((item) => <option key={item.id} value={item.id}>{new Date(item.created_at).toLocaleString()} · {item.status}</option>)}
           </select></div>
         <div className="coaching-review-body">
-          {current?.recording_url ? <video className="coaching-video" src={current.recording_url} controls preload="metadata" /> : <div className="coaching-video placeholder">No recording yet</div>}
+          {current?.recording_url ? <video ref={recordingRef} className="coaching-video" src={current.recording_url} controls preload="metadata" /> : <div className="coaching-video placeholder">No recording yet</div>}
           <div className="coaching-saved-notes"><span className="eyebrow">Recorded moments</span>
             {savedMoments.length ? <ol>{savedMoments.map((item) => <li key={item.id}><time>{Math.floor(item.at_ms / 1000)}s</time><span>{item.payload.text ?? "Marked moment"}</span></li>)}</ol> : <p className="muted">No timed notes in this recording.</p>}
             {status === "queued" || status === "processing" ? <p className="coaching-status">Gemini is reviewing the recording and notes{current?.latest_analysis?.phase ? ` · ${current.latest_analysis.phase}` : ""}…</p> : null}
@@ -222,6 +223,7 @@ export function ReplayCoaching({ episode, sessions, replay, onSaved, onDiscuss, 
         <div className="coaching-analysis-head"><div><span className="eyebrow">Semantic ↔ symbolic suggestions</span><strong>What the review proposes</strong></div>
           <button className="coaching-primary" onClick={() => onDiscuss(current!)}>Discuss and update policy ↗</button></div>
         <p className="coaching-summary">{analysis.summary}</p>
+        {analysis.moments.length ? <ol className="coaching-observations">{analysis.moments.map((moment, index) => <li key={index}><button type="button" onClick={() => { if (!recordingRef.current) return; recordingRef.current.currentTime = moment.start_ms / 1000; void recordingRef.current.play(); }}>↳ {Math.floor(moment.start_ms / 60000).toString().padStart(2, "0")}:{Math.floor(moment.start_ms / 1000 % 60).toString().padStart(2, "0")}</button><div><strong>{moment.observation}</strong><p>{moment.coaching_intent}</p></div></li>)}</ol> : null}
         <ol className="coaching-proposals">{analysis.ir_proposals.map((proposal, index) => <li key={index}>
           <div className="proposal-index">{index + 1}</div>
           <div className="proposal-body"><small>{proposal.layer}</small><strong>{proposal.change}</strong><p>{proposal.rationale}</p><span>Test: {proposal.verification}</span></div>

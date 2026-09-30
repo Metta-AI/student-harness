@@ -467,9 +467,9 @@ export function StudentApp({ league }: { league: League }) {
                   {matchStats.policy_stats.flatMap((policy) => Object.entries(policy.avg_metrics).filter(([name]) => name !== "reward").map(([name, value]) => <span key={`${policy.position}-${name}`}>Seat {policy.position + 1} {name.replaceAll("_", " ")} <b>{new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)}</b></span>))}</div>
               </details> : null}
               {matchStatsError ? <p className="error replay-metrics-error">{matchStatsError}</p> : null}
-              <div className="replay-note-box"><label htmlFor="replay-note">Notice something?</label>
+              {!coachingAvailable ? <div className="replay-note-box"><label htmlFor="replay-note">Notice something?</label>
                 <div><textarea id="replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero retreated too early…" />
-                  <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Discuss in chat ↗</button></div></div>
+                  <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Discuss in chat ↗</button></div></div> : null}
             </section> : null}
             {arenaError ? <p className="error">{arenaError}</p> : null}
             {!arena ? <p className="muted">Loading episodes…</p> : episodes.length === 0 ? <div className="empty-games"><p>No games yet. Ask the Coplay Agent to upload your policy and start one.</p>{starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : null}</div> :

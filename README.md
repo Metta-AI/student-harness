@@ -3,6 +3,8 @@
 Build a BASIC policy for [Gods of the Arena](https://softmax.com/gods-of-the-arena) from a browser or this one-file starter.
 The browser app asks for a Softmax user token, lets a student describe a strategy in chat, and starts a durable cloud job.
 That job edits the policy, uploads it, and requests one hosted episode. The student can then enter the league.
+The workspace reads live league status and the student's hosted runs from Softmax. Completed episodes can be
+reviewed with optional notes; **Record & analyze** opens a new saved chat with the recorded scores and policy metrics.
 
 ## Quick start with an AI coding agent
 

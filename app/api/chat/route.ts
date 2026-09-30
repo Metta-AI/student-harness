@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { start, getRun } from "workflow/api";
 import { z } from "zod";
 import { currentSession, sameOrigin, seal, setSessionCookie } from "../../../lib/session";
+import { getEpisodeStats, getExperience } from "../../../lib/softmax";
 import { buildPolicy } from "../../../workflows/build-policy";
 
 const messagesSchema = z.array(z.object({
@@ -20,6 +21,38 @@ export async function POST(request: Request) {
   const { messages } = z.object({ messages: messagesSchema }).parse(await request.json());
   const latest = messages.at(-1);
   if (latest?.role !== "user") return NextResponse.json({ error: "Expected a student message" }, { status: 400 });
+
+  const analysis = /^Analyze episode (ereq_[0-9a-f-]{36}) from run (xreq_[0-9a-f-]{36})\./.exec(latest.text);
+  if (analysis) {
+    const experience = await getExperience(session.token, analysis[2]);
+    if (experience.requester_user_id !== session.subjectId) {
+      return NextResponse.json({ error: "This run is not yours" }, { status: 403 });
+    }
+    const episode = experience.episodes.find((item) => item.id === analysis[1]);
+    if (!episode) return NextResponse.json({ error: "Episode not found in this run" }, { status: 404 });
+    if (episode.status !== "completed") {
+      return NextResponse.json({ message: `This episode is ${episode.status}. Open the run again when it finishes to analyze recorded results.` });
+    }
+    const stats = await getEpisodeStats(session.token, episode.id);
+    const agent = new ToolLoopAgent({
+      model: anthropic("claude-sonnet-5-5"),
+      instructions: `You are a Gods of the Arena policy coach. Analyze the recorded episode for a college student.
+Use only the supplied episode results and the student's notes. Do not invent game events, available BASIC functions, or claim to have watched the replay.
+In at most 120 words, summarize the outcome and give 2 concrete, testable policy recommendations. Distinguish evidence from hypotheses.
+If the run contains multiple policies and ownership is unclear, say so and make recommendations conditional.
+End with one short suggested prompt the student can send to improve their BASIC policy. Do not claim a policy change was already made.`,
+    });
+    const result = await agent.generate({
+      prompt: `${latest.text}\n\nRecorded episode results:\n${JSON.stringify({
+        status: episode.status,
+        participant_scores: episode.participant_scores,
+        steps: stats.steps,
+        game_stats: stats.game_stats,
+        policy_stats: stats.policy_stats,
+      })}`,
+    });
+    return NextResponse.json({ message: result.text });
+  }
 
   if (/\b(build|create|make|edit|improve|update|write)\b/i.test(latest.text)) {
     let previousSource: string | undefined;

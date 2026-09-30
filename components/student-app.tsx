@@ -1,15 +1,18 @@
 "use client";
 
 import {
+  AssistantCloud,
   AssistantRuntimeProvider,
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  ThreadListItemPrimitive,
+  ThreadListPrimitive,
   useAuiState,
   useLocalRuntime,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Job = {
   status: string;
@@ -32,7 +35,14 @@ function ChatMessage() {
   </MessagePrimitive.Root>;
 }
 
-function Chat({ onJob }: { onJob: () => void }) {
+function Chat({ onJob, onSignOut }: { onJob: () => void; onSignOut: () => void }) {
+  const cloud = useMemo(() => new AssistantCloud({
+    baseUrl: process.env.NEXT_PUBLIC_ASSISTANT_BASE_URL!,
+    authToken: async () => {
+      const response = await fetch("/api/assistant-ui-token", { method: "POST" });
+      return response.ok ? response.text() : null;
+    },
+  }), []);
   const adapter = useMemo<ChatModelAdapter>(() => ({
     async run({ messages, abortSignal }) {
       const response = await fetch("/api/chat", {
@@ -42,7 +52,7 @@ function Chat({ onJob }: { onJob: () => void }) {
           messages: messages.map((message) => ({
             role: message.role,
             text: message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n"),
-          })).filter((message) => message.role === "user" || message.role === "assistant"),
+          })).filter((message) => message.role === "user" || message.role === "assistant").slice(-20),
         }),
         signal: abortSignal,
       });
@@ -52,18 +62,36 @@ function Chat({ onJob }: { onJob: () => void }) {
       return { content: [{ type: "text", text: data.message }] };
     },
   }), [onJob]);
-  const runtime = useLocalRuntime(adapter);
+  const runtime = useLocalRuntime(adapter, { cloud });
 
   return <AssistantRuntimeProvider runtime={runtime}>
-    <ThreadPrimitive.Root className="thread">
-      <ThreadPrimitive.Viewport className="messages">
-        <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-      </ThreadPrimitive.Viewport>
-      <ComposerPrimitive.Root className="composer">
-        <ComposerPrimitive.Input className="composer-input" placeholder="Ask about a strategy, or say ‘Build a policy that pushes a lane’…" />
-        <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
-      </ComposerPrimitive.Root>
-    </ThreadPrimitive.Root>
+    <aside className="chat-rail">
+      <div className="rail-top"><a className="brand" href="/">NEURALHUB <span>×</span> ARENA</a>
+        <button className="text-button" onClick={onSignOut}>Sign out</button></div>
+      <div className="rail-heading"><p className="eyebrow">Arena coach</p><h1>What should your hero do?</h1></div>
+      <ThreadListPrimitive.Root className="thread-list">
+        <ThreadListPrimitive.New className="new-thread"><span aria-hidden="true">＋</span> New chat</ThreadListPrimitive.New>
+        <p className="section-label">Recent chats</p>
+        <div className="thread-items"><ThreadListPrimitive.Items>
+          {() => <ThreadListItemPrimitive.Root className="thread-item">
+            <ThreadListItemPrimitive.Trigger className="thread-trigger">
+              <ThreadListItemPrimitive.Title fallback="New chat" />
+            </ThreadListItemPrimitive.Trigger>
+            <ThreadListItemPrimitive.Archive className="thread-archive" aria-label="Archive chat">×</ThreadListItemPrimitive.Archive>
+          </ThreadListItemPrimitive.Root>}
+        </ThreadListPrimitive.Items></div>
+      </ThreadListPrimitive.Root>
+      <ThreadPrimitive.Root className="thread">
+        <ThreadPrimitive.Viewport className="messages">
+          <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
+        </ThreadPrimitive.Viewport>
+        <div className="composer-wrap"><ComposerPrimitive.Root className="composer">
+          <ComposerPrimitive.Input className="composer-input" placeholder="Ask about strategy or build a policy…" />
+          <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
+        </ComposerPrimitive.Root>
+        <p className="hint">Try: “Build a policy that prioritizes enemy towers.”</p></div>
+      </ThreadPrimitive.Root>
+    </aside>
   </AssistantRuntimeProvider>;
 }
 
@@ -76,6 +104,7 @@ export function StudentApp({ league }: { league: League }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [starterSource, setStarterSource] = useState("");
   const [activeTab, setActiveTab] = useState<"policy" | "game">("policy");
+  const onJob = useCallback(() => { setActiveTab("game"); setRefreshKey((key) => key + 1); }, []);
 
   useEffect(() => {
     fetch("/api/session").then((response) => response.json()).then((data) => setEmail(data.email));
@@ -127,11 +156,11 @@ export function StudentApp({ league }: { league: League }) {
     URL.revokeObjectURL(url);
   }
 
-  return <main className="shell">
-    <header className="topbar">
+  return <main className={`shell${email ? " signed-in" : ""}`}>
+    {!email ? <header className="topbar">
       <a className="brand" href="/">NEURALHUB <span>×</span> GODS OF THE ARENA</a>
       <a className="league-link" href={`https://softmax.com/observatory/v2?tab=leagues&detail=league:${league.id}`} target="_blank" rel="noreferrer">{league.name} ↗</a>
-    </header>
+    </header> : null}
     {!email ? <div className="intro">
       <p className="eyebrow">Diablo Valley College · student arena</p>
       <h1>Describe your strategy.<br /><em>Watch your hero play.</em></h1>
@@ -151,13 +180,10 @@ export function StudentApp({ league }: { league: League }) {
           {error ? <p className="error">{error}</p> : null}
         </form>
       </section> : <div className="workspace">
-        <section className="chat-card card">
-          <div className="card-header"><div><p className="eyebrow">Arena coach</p><h2>What should your hero do?</h2></div>
-            <button className="text-button" onClick={signOut}>Sign out</button></div>
-          <Chat onJob={() => { setActiveTab("game"); setRefreshKey((key) => key + 1); }} />
-          <p className="hint">Try: “Build a policy that prioritizes enemy towers and retreats when hurt.”</p>
-        </section>
-        <section className="preview-card card">
+        <Chat key={email} onJob={onJob} onSignOut={signOut} />
+        <section className="preview-card">
+          <div className="workspace-topbar"><span>GODS OF THE ARENA</span>
+            <a className="league-link" href={`https://softmax.com/observatory/v2?tab=leagues&detail=league:${league.id}`} target="_blank" rel="noreferrer">{league.name} ↗</a></div>
           <div className="preview-header">
             <div><p className="eyebrow">Student workspace</p><h2>Your hero is taking shape.</h2>
               <p className="preview-subtitle">One BASIC file. One hosted game. Your strategy.</p></div>

@@ -40,6 +40,32 @@ const episodeSchema = z.object({
 });
 const experiencePageSchema = z.object({ entries: z.array(experienceSchema) });
 const experienceDetailSchema = experienceSchema.extend({ episodes: z.array(episodeSchema) });
+const coachingAnalysisSummarySchema = z.object({ id: z.string(), status: z.string() });
+const coachingSessionSchema = z.object({
+  id: z.string(), episode_id: z.string(), user_id: z.string(), coworld_name: z.string().nullable(),
+  status: z.string(), created_at: z.string(), duration_ms: z.number().nullable(),
+  latest_analysis: coachingAnalysisSummarySchema.nullable(),
+  feed: z.object({
+    summary: z.string().nullable(), quote: z.string().nullable(), insights: z.array(z.string()),
+  }).nullable(),
+  policy_reference: z.object({ policy_version_id: z.string().nullable(), slot: z.number().nullable() }),
+});
+const coachingSessionDetailSchema = coachingSessionSchema.extend({ declared_context: z.string() });
+const coachingAnalysisSchema = z.object({
+  status: z.string(),
+  result: z.object({
+    summary: z.string(),
+    moments: z.array(z.object({
+      start_ms: z.number(), end_ms: z.number(), observation: z.string(),
+      coaching_intent: z.string(), uncertainty: z.string(), evidence_ids: z.array(z.string()),
+    })),
+    ir_proposals: z.array(z.object({
+      layer: z.string(), change: z.string(), rationale: z.string(),
+      verification: z.string(), evidence_ids: z.array(z.string()),
+    })),
+    questions: z.array(z.string()),
+  }).nullable(),
+});
 const episodeStatsSchema = z.object({
   steps: z.number().nullable(), game_stats: z.record(z.string(), z.number()),
   policy_stats: z.array(z.object({
@@ -83,6 +109,19 @@ export async function listExperiences(token: string) {
 
 export async function getExperience(token: string, requestId: string) {
   return softmax(`/v2/experience-requests/${requestId}`, token, experienceDetailSchema);
+}
+
+export async function listCoachingSessions(token: string) {
+  const sessions = await softmax("/v2/coaching-sessions?limit=30", token, z.array(coachingSessionSchema));
+  return sessions.filter((session) => session.coworld_name === league.name);
+}
+
+export async function getCoachingSession(token: string, sessionId: string) {
+  return softmax(`/v2/coaching-sessions/${sessionId}`, token, coachingSessionDetailSchema);
+}
+
+export async function getCoachingAnalysis(token: string, sessionId: string, analysisId: string) {
+  return softmax(`/v2/coaching-sessions/${sessionId}/analyses/${analysisId}`, token, coachingAnalysisSchema);
 }
 
 export async function getEpisodeStats(token: string, episodeId: string) {

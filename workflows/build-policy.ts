@@ -21,7 +21,8 @@ async function editPolicy(request: string, previousSource?: string) {
     instructions: `You improve a Gods of the Arena policy written in Polyworld BASIC.
 Make one focused gameplay change. Return an exact substring from the source as "before" and its replacement as "after".
 The substring must occur exactly once. Preserve the rest of the file. Do not use Python, Nim, external imports, or
-functions absent from the source or the public policy guide. Keep the policy under 64 KiB. Explain the change briefly.`,
+functions absent from the source or the public policy guide. Treat replay coaching as an observation, especially when
+its coached policy is unbound or differs from this file. Keep the policy under 64 KiB. Explain the change briefly.`,
   });
   const result = await agent.generate({
     prompt: `Student request: ${request}\n\nCurrent hero.bas:\n${source}`,

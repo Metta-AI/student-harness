@@ -33,8 +33,13 @@ type Experience = {
 };
 type Episode = {
   id: string; status: string; replay_url: string | null; live_url: string | null;
-  error: string | null; job_index: number | null; completed_at: string | null;
+  episode_id: string | null; error: string | null; job_index: number | null; completed_at: string | null;
   participant_scores: { position: number; score: number }[];
+};
+type CoachingSession = {
+  id: string; episode_id: string; status: string; created_at: string; duration_ms: number | null;
+  latest_analysis: { id: string; status: string } | null;
+  feed: { summary: string | null; quote: string | null; insights: string[] } | null;
 };
 type ArenaData = {
   league: {
@@ -45,12 +50,13 @@ type ArenaData = {
 };
 type ExperienceDetail = Experience & { episodes: Episode[] };
 type AnalysisRequest = { id: number; prompt: string };
+const contextMarker = /\n\n\[(?:coaching-session:csn_[0-9a-f-]{36}|replay-note:ereq_[0-9a-f-]{36}:xreq_[0-9a-f-]{36})\]$/;
 
 function ChatMessage() {
   const role = useAuiState((state) => state.message.role);
   return <MessagePrimitive.Root className={`message ${role}`}>
     <span className="message-label">{role === "user" ? "You" : "Assistant"}</span>
-    <MessagePrimitive.Parts components={{ Text: role === "user" ? ({ text }) => <p>{text}</p> : () => <MarkdownTextPrimitive /> }} />
+    <MessagePrimitive.Parts components={{ Text: role === "user" ? ({ text }) => <p>{text.replace(contextMarker, "")}</p> : () => <MarkdownTextPrimitive /> }} />
   </MessagePrimitive.Root>;
 }
 
@@ -70,10 +76,15 @@ function Chat({ onJob, onSignOut, analysisRequest }: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: messages.map((message) => ({
+          messages: (() => {
+            const all = messages.map((message) => ({
             role: message.role,
             text: message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n"),
-          })).filter((message) => message.role === "user" || message.role === "assistant").slice(-20),
+            })).filter((message) => message.role === "user" || message.role === "assistant");
+            const recent = all.slice(-20);
+            const anchor = all.find((message) => contextMarker.test(message.text));
+            return anchor && !recent.includes(anchor) ? [anchor, ...all.slice(-19)] : recent;
+          })(),
         }),
         signal: abortSignal,
       });
@@ -111,7 +122,7 @@ function Chat({ onJob, onSignOut, analysisRequest }: {
       <ThreadPrimitive.Root className="thread">
         <ThreadPrimitive.Viewport className="messages">
           <ThreadPrimitive.Empty><div className="chat-empty"><span className="chat-empty-icon">✳</span>
-            <p>Describe a strategy, or choose a recorded episode to review.</p></div></ThreadPrimitive.Empty>
+            <p>Describe a strategy, or bring back feedback from a replay.</p></div></ThreadPrimitive.Empty>
           <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
         </ThreadPrimitive.Viewport>
         <div className="composer-wrap"><ComposerPrimitive.Root className="composer">
@@ -135,9 +146,13 @@ export function StudentApp({ league }: { league: League }) {
   const [activeTab, setActiveTab] = useState<"overview" | "policy">("overview");
   const [arena, setArena] = useState<ArenaData | null>(null);
   const [arenaError, setArenaError] = useState("");
+  const [coaching, setCoaching] = useState<CoachingSession[]>([]);
+  const [coachingAvailable, setCoachingAvailable] = useState<boolean | null>(null);
+  const [coachingError, setCoachingError] = useState("");
   const [selectedRun, setSelectedRun] = useState("");
   const [runDetail, setRunDetail] = useState<ExperienceDetail | null>(null);
-  const [notes, setNotes] = useState("");
+  const [selectedEpisodeId, setSelectedEpisodeId] = useState("");
+  const [replayNote, setReplayNote] = useState("");
   const [analysisRequest, setAnalysisRequest] = useState<AnalysisRequest | null>(null);
   const onJob = useCallback(() => { setActiveTab("overview"); setRefreshKey((key) => key + 1); }, []);
 
@@ -151,6 +166,20 @@ export function StudentApp({ league }: { league: League }) {
     const refresh = () => fetch("/api/job").then((response) => response.json()).then(setJob);
     refresh();
     const timer = window.setInterval(refresh, 4000);
+    return () => window.clearInterval(timer);
+  }, [email, refreshKey]);
+
+  useEffect(() => {
+    if (!email) return;
+    const refresh = () => fetch("/api/coaching").then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not load coaching sessions");
+      setCoaching(data.sessions);
+      setCoachingAvailable(data.available);
+      setCoachingError("");
+    }).catch((cause: Error) => setCoachingError(cause.message));
+    refresh();
+    const timer = window.setInterval(refresh, 15000);
     return () => window.clearInterval(timer);
   }, [email, refreshKey]);
 
@@ -207,6 +236,9 @@ export function StudentApp({ league }: { league: League }) {
     setArena(null);
     setRunDetail(null);
     setSelectedRun("");
+    setCoaching([]);
+    setCoachingAvailable(null);
+    setReplayNote("");
     setAnalysisRequest(null);
   }
 
@@ -226,13 +258,25 @@ export function StudentApp({ league }: { league: League }) {
     URL.revokeObjectURL(url);
   }
 
-  function analyzeEpisode(episode: Episode) {
+  function discussCoaching(item: CoachingSession) {
     setAnalysisRequest({
       id: Date.now(),
-      prompt: `Analyze episode ${episode.id} from run ${selectedRun}. My notes: ${notes.trim() || "No additional observations."}`,
+      prompt: `Can we talk through what I noticed in this replay?\n\n[coaching-session:${item.id}]`,
     });
-    setNotes("");
   }
+
+  function discussReplay(episode: Episode) {
+    const note = replayNote.trim();
+    if (!note) return;
+    setAnalysisRequest({
+      id: Date.now(),
+      prompt: `I watched this replay and noticed: ${note}\n\n[replay-note:${episode.id}:${selectedRun}]`,
+    });
+    setReplayNote("");
+  }
+
+  const selectedEpisode = runDetail?.episodes.find((episode) => episode.id === selectedEpisodeId)
+    ?? runDetail?.episodes.find((episode) => episode.status === "completed");
 
   return <main className={`shell${email ? " signed-in" : ""}`}>
     {!email ? <header className="topbar">
@@ -296,7 +340,7 @@ export function StudentApp({ league }: { league: League }) {
               {!arena ? <p className="muted">Loading your games…</p> : arena.experiences.length === 0 ?
                 <p className="muted">No hosted games yet. Ask the coach to build a policy to start one.</p> :
                 <div className="run-layout"><div className="run-list" aria-label="Hosted runs">
-                  {arena.experiences.map((run) => <button key={run.id} className={`run-row ${selectedRun === run.id ? "selected" : ""}`} onClick={() => { setSelectedRun(run.id); setRunDetail(null); setNotes(""); }}>
+                  {arena.experiences.map((run) => <button key={run.id} className={`run-row ${selectedRun === run.id ? "selected" : ""}`} onClick={() => { setSelectedRun(run.id); setRunDetail(null); setSelectedEpisodeId(""); setReplayNote(""); }}>
                     <span><strong>{run.title || `Hosted run · ${new Date(run.created_at).toLocaleDateString()}`}</strong>
                       <small>{new Date(run.created_at).toLocaleString()} · {run.completed_count}/{run.episode_count} complete</small></span>
                     <span className={`run-status ${run.status}`}>{run.status}</span>
@@ -311,18 +355,32 @@ export function StudentApp({ league }: { league: League }) {
                           <span><strong>{episode.status === "completed" ? "Episode recorded" : `Episode ${episode.status}`}</strong>
                             <small>{episode.completed_at ? new Date(episode.completed_at).toLocaleString() : episode.error ?? "Waiting for the hosted game"}</small></span></div>
                         <div className="episode-actions">
-                          {episode.replay_url ? <a href={`https://softmax.com/observatory/v2?tab=overview&detail=episode-request:${episode.id}`} target="_blank" rel="noreferrer">Replay ↗</a> : null}
-                          {episode.status === "completed" ? <button onClick={() => analyzeEpisode(episode)}>Record &amp; analyze ↗</button> : null}
+                          {episode.episode_id && episode.replay_url ? <a className="coach-replay-link" href={coachingAvailable ? `https://softmax.com/observatory/v2?tab=overview&detail=episode-coaching:${episode.episode_id}` : `https://softmax.com/observatory/v2?tab=overview&detail=episode-request:${episode.id}`} target="_blank" rel="noreferrer">{coachingAvailable ? "Watch & coach ↗" : "Watch replay ↗"}</a> : null}
+                          {coachingAvailable === false && episode.status === "completed" ? <button onClick={() => { setSelectedEpisodeId(episode.id); setReplayNote(""); }}>Add a note</button> : null}
                         </div>
                       </div>)}</div>
-                      {runDetail.episodes.some((episode) => episode.status === "completed") ? <div className="notes-box">
-                        <label htmlFor="episode-notes">What did you notice? <span>Optional</span></label>
-                        <textarea id="episode-notes" value={notes} onChange={(event) => setNotes(event.target.value.slice(0, 1200))} placeholder="e.g. My hero got stuck near the tower…" />
-                        <p>Choose “Record &amp; analyze” above. Your notes and the episode results go into a new saved chat.</p>
-                      </div> : null}
                     </>}
                   </div></div>}
+              {coachingAvailable === false && selectedEpisode ? <div className="replay-note-box">
+                <label htmlFor="replay-note">What stood out in episode #{(selectedEpisode.job_index ?? 0) + 1}?</label>
+                <p>Watch the replay, then jot down a moment in your own words. A timestamp helps you return to it.</p>
+                <textarea id="replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero kept retreating after its health recovered…" />
+                <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Talk it through ↗</button>
+              </div> : null}
             </section>
+            {coachingAvailable ? <section className="coaching-panel">
+              <div className="panel-title"><div><p className="eyebrow">Your replay feedback</p><h3>Coaching sessions</h3></div>
+                <a href="https://softmax.com/observatory/coaching-sessions" target="_blank" rel="noreferrer">All sessions ↗</a></div>
+              <p className="coaching-intro">Watch a hosted replay, narrate or mark the moments that matter, then bring the feedback here to discuss your next policy change.</p>
+              {coachingError ? <p className="error">{coachingError}</p> : null}
+              {coaching.length ? <div className="coaching-list">{coaching.slice(0, 5).map((item) => <div className="coaching-row" key={item.id}>
+                <div><span className="coaching-date">{new Date(item.created_at).toLocaleString()} · {item.latest_analysis?.status === "complete" ? "Feedback ready" : item.latest_analysis?.status ?? item.status}</span>
+                  <strong>{item.feed?.summary || "Replay coaching session"}</strong>
+                  {item.feed?.insights[0] ? <p>{item.feed.insights[0]}</p> : null}</div>
+                <div className="coaching-actions"><a href={`https://softmax.com/observatory/v2?tab=overview&detail=coaching-session:${item.id}`} target="_blank" rel="noreferrer">Review ↗</a>
+                  {item.latest_analysis?.status === "complete" ? <button onClick={() => discussCoaching(item)}>Discuss in chat ↗</button> : null}</div>
+              </div>)}</div> : !coachingError ? <p className="muted">Your replay feedback will appear here after you coach a game.</p> : null}
+            </section> : null}
           </div>}
         </section>
       </div>}

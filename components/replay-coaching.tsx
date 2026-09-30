@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { track } from "../lib/analytics";
+import { events } from "../lib/analytics-events";
 import { coachingCaptureSupported, startCoachingRecording, type CoachingRecording } from "../lib/coaching-recorder";
 import { RecordingClock } from "../lib/coaching-clock";
 
@@ -133,9 +135,11 @@ export function ReplayCoaching({ episode, sessions, replay, onSaved, onDiscuss, 
       setPhase("idle");
       onRecordingChange(false);
       onSaved();
+      track(events.coachingSaved, { coaching_session_id: unsaved.active.id, duration_ms: unsaved.duration, bytes: unsaved.blob.size });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save recording");
       setPhase("failed");
+      track(events.coachingRecordingFailed, { stage: "save", message: cause instanceof Error ? cause.message.slice(0, 120) : "unknown" });
     }
   }, [flush, onRecordingChange, onSaved]);
 
@@ -146,6 +150,7 @@ export function ReplayCoaching({ episode, sessions, replay, onSaved, onDiscuss, 
     setPhase("saving");
     const duration = active.clock.elapsedMs();
     const blob = await active.recording.stop(duration);
+    track(events.coachingRecordingFinished, { duration_ms: duration, bytes: blob.size, marks: marks.length });
     unsavedRef.current = { active, blob, duration };
     await save(unsavedRef.current);
   }, [save]);
@@ -169,9 +174,11 @@ export function ReplayCoaching({ episode, sessions, replay, onSaved, onDiscuss, 
       setElapsed(0);
       setPhase("recording");
       onRecordingChange(true);
+      track(events.coachingRecordingStarted, { episode_id: episode.id, has_context: context.trim().length > 0 });
     } catch (cause) {
       recording?.abort();
       const denied = cause instanceof DOMException && (cause.name === "NotAllowedError" || cause.name === "SecurityError");
+      track(events.coachingRecordingFailed, { stage: "start", denied, message: cause instanceof Error ? cause.message.slice(0, 120) : "unknown" });
       setError(denied ? "Recording needs microphone and tab-sharing permission. Allow both when the browser asks (in Brave, also lower Shields for this site or allow them under Site settings), then press Record again." : cause instanceof Error ? cause.message : "Could not start recording");
       setPhase("idle");
     }

@@ -1,5 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { trackServer } from "../../lib/analytics-server";
+import { events } from "../../lib/analytics-events";
 import league from "../../league.json";
 import { getCoachingAnalysis, getCoachingSession, getEpisodeStats, getExperience, listCoachingSessions } from "../../lib/softmax";
 import { requireStudentToken } from "../lib/student";
@@ -13,6 +15,7 @@ export default defineTool({
   label: { start: ({ coaching_session_id, episode }) => coaching_session_id ? "Read coaching analysis" : episode ? "Read episode statistics" : "List coaching sessions" },
   async execute({ coaching_session_id, episode }, ctx) {
     const student = await requireStudentToken(ctx);
+    await trackServer(student.subjectId, events.coachingFeedbackRead, { mode: coaching_session_id ? "session" : episode ? "episode" : "list" });
     if (episode) {
       const experience = await getExperience(student.token, episode.xp_request_id);
       if (experience.requester_user_id !== student.subjectId) throw new Error("This run is not the student's.");

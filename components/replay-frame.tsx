@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { track } from "../lib/analytics";
+import { events } from "../lib/analytics-events";
 
 type ViewerState = { kind: "loading"; alive: boolean } | { kind: "ready" } | { kind: "error"; message: string } | { kind: "stalled"; alive: boolean };
 
@@ -15,16 +17,21 @@ export function ReplayFrame({ src, title }: { src: string; title: string }) {
 
   useEffect(() => {
     setState({ kind: "loading", alive: false });
+    const mounted = Date.now();
     const onMessage = (event: MessageEvent) => {
       if (!frame.current || event.source !== frame.current.contentWindow) return;
       const data = event.data as { src?: unknown; type?: unknown; message?: unknown } | null;
       if (data?.src !== "coworld-replay") return;
-      if (data.type === "ready") setState({ kind: "ready" });
-      else if (data.type === "error") setState({ kind: "error", message: typeof data.message === "string" ? data.message : "The replay could not be drawn." });
+      if (data.type === "ready") { setState({ kind: "ready" }); track(events.replayReady, { ms: Date.now() - mounted }); }
+      else if (data.type === "error") { setState({ kind: "error", message: typeof data.message === "string" ? data.message : "The replay could not be drawn." }); track(events.replayFailed, { reason: "viewer_error" }); }
       else setState((current) => current.kind === "loading" || current.kind === "stalled" ? { ...current, alive: true } : current);
     };
     window.addEventListener("message", onMessage);
-    const stall = window.setTimeout(() => setState((current) => current.kind === "loading" ? { kind: "stalled", alive: current.alive } : current), 25_000);
+    const stall = window.setTimeout(() => setState((current) => {
+      if (current.kind !== "loading") return current;
+      track(events.replayFailed, { reason: current.alive ? "slow" : "blocked" });
+      return { kind: "stalled", alive: current.alive };
+    }), 25_000);
     return () => { window.removeEventListener("message", onMessage); window.clearTimeout(stall); };
   }, [src]);
 

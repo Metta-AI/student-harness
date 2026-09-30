@@ -1,5 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { trackServer } from "../../lib/analytics-server";
+import { events } from "../../lib/analytics-events";
 import { experimentByXp, insertExperiment, listExperiments, policyVersionBySoftmaxId, updateExperiment, type EpisodeSummary } from "../../lib/db";
 import { getEpisodeStats, getExperience, listExperiences } from "../../lib/softmax";
 import { requireStudentToken } from "../lib/student";
@@ -48,6 +50,10 @@ export default defineTool({
     await updateExperiment(experiment.xp_request_id, { status: experience.status, episodes, summary, completed_at: done ? experience.completed_at ?? new Date().toISOString() : null });
     const refreshed = await experimentByXp(student.subjectId, experiment.xp_request_id);
     if (refreshed) await writeExperiment(await ctx.getSandbox(), refreshed);
+    await trackServer(student.subjectId, events.hostedGameChecked, { xp_request_id: experiment.xp_request_id, status: experience.status, games_completed: completed.length, games_failed: experience.failed_count, mean_policy_score: summary.mean_policy_score });
+    if (done && experiment.status !== "completed" && experiment.status !== "failed") {
+      await trackServer(student.subjectId, events.hostedGameCompleted, { xp_request_id: experiment.xp_request_id, status: experience.status, games_completed: completed.length, mean_policy_score: summary.mean_policy_score, linked_revision: !!experiment.policy_version_id });
+    }
     return {
       xp_request_id: experiment.xp_request_id, title: experiment.title, hypothesis: experiment.hypothesis, status: experience.status,
       counts: { pending: experience.pending_count, running: experience.running_count, completed: experience.completed_count, failed: experience.failed_count },

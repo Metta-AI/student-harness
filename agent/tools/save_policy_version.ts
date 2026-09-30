@@ -1,5 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { trackServer } from "../../lib/analytics-server";
+import { events } from "../../lib/analytics-events";
 import { insertPolicyVersion, latestPolicyVersion, listExperiments, toRevision } from "../../lib/db";
 import { baselineRevision, reconcileSource, semanticFieldsSchema } from "../../lib/semantic-ir";
 import { requireStudent } from "../lib/student";
@@ -27,6 +29,8 @@ export default defineTool({
     await commitVersion(sandbox, row, await listExperiments(student.subjectId, row.id));
     const rule = revision.ir.strategy.at(-1)!;
     const line = (offset: number) => source.slice(0, offset).split("\n").length;
+    const baseline = !previous && source === parent.source;
+    await trackServer(student.subjectId, events.policyRevisionSaved, { revision: row.revision_number, baseline, evidence_count: evidence.length, stale_rules: revision.ir.strategy.filter((item) => item.source.status === "stale").length, source_bytes: Buffer.byteLength(source, "utf8") }, { revisions_saved: row.revision_number, last_revision_at: row.created_at });
     return {
       revision: row.revision_number,
       revision_id: row.revision_id,

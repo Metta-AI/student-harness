@@ -3,6 +3,8 @@
 import { useEveAgent, type EveMessage, type EveMessagePart } from "eve/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
+import { track } from "../lib/analytics";
+import { events } from "../lib/analytics-events";
 
 export type ChatReference = {
   kind: "coaching-session" | "replay-note" | "policy-results";
@@ -50,7 +52,7 @@ function parseSuggestions(text: string): string[] {
 const referenceKindLabel: Record<ChatReference["kind"], string> = { "coaching-session": "Coaching session", "replay-note": "Replay note", "policy-results": "Policy results" };
 
 function ReferenceChip({ reference, onOpen }: { reference: ChatReference; onOpen: (reference: ChatReference) => void }) {
-  return <button type="button" className="ref-chip" onClick={() => onOpen(reference)} title="Open in the workspace">
+  return <button type="button" className="ref-chip" onClick={() => { track(events.referenceOpened, { kind: reference.kind }); onOpen(reference); }} title="Open in the workspace">
     <span className="ref-kind">{referenceKindLabel[reference.kind]}</span><span className="ref-label">{reference.label}</span><span aria-hidden="true">↗</span>
   </button>;
 }
@@ -128,16 +130,28 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
   const [draft, setDraft] = useState("");
   const firstText = useRef<string>(initialRequest?.text ?? "");
   const started = useRef(false);
+  const turnStarted = useRef(0);
+  const toolsThisTurn = useRef(0);
   const viewport = useRef<HTMLDivElement>(null);
   const agent = useEveAgent({
     initialSession: sessionId ? { sessionId, streamIndex: 0 } : undefined,
     resume: sessionId !== null,
     onSessionChange: (session) => { if (session && !sessionId) onSession(session.sessionId, firstText.current); },
     onEvent: (event) => {
-      if (event.type === "action.result") onActivity("tool");
-      if (event.type === "turn.completed") onActivity("turn");
+      if (event.type === "action.result") {
+        onActivity("tool");
+        const data = event.data as { status?: string; result?: { toolName?: string } } | undefined;
+        toolsThisTurn.current += 1;
+        track(events.agentToolCompleted, { tool: data?.result?.toolName, status: data?.status });
+      }
+      if (event.type === "turn.started") { turnStarted.current = Date.now(); toolsThisTurn.current = 0; }
+      if (event.type === "turn.completed") {
+        onActivity("turn");
+        track(events.agentTurnCompleted, { duration_ms: turnStarted.current ? Date.now() - turnStarted.current : undefined, tool_calls: toolsThisTurn.current });
+      }
+      if (event.type === "input.requested") track(events.agentApprovalRequested, {});
     },
-    onError: () => undefined,
+    onError: (error) => track(events.agentError, { message: error.message.slice(0, 200) }),
   });
   const busy = agent.status === "submitted" || agent.status === "streaming";
   const locked = agent.status === "resuming" || disabled;
@@ -146,6 +160,7 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
     if (!initialRequest || started.current) return;
     started.current = true;
     const text = initialRequest.reference ? withReference(initialRequest.text, initialRequest.reference) : initialRequest.text;
+    track(events.chatStarted, { source: initialRequest.context?.kind ?? "workspace", reference_kind: initialRequest.reference?.kind });
     void agent.send(text, initialRequest.context ? { clientContext: initialRequest.context } : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialRequest]);
@@ -155,18 +170,22 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
   const submit = useCallback(() => {
     const text = draft.trim();
     if (!text || locked) return;
-    if (!firstText.current) firstText.current = text;
+    if (!firstText.current) { firstText.current = text; track(events.chatStarted, { source: "composer" }); }
     setDraft("");
+    track(events.chatMessageSent, { length: text.length, steer: busy, source: "composer" });
     void agent.send(text, busy ? { turnPolicy: "steer" } : undefined);
   }, [agent, busy, draft, locked]);
 
   const respond = useCallback((requestId: string, optionId: string) => {
+    track(events.agentApprovalAnswered, { option: optionId });
     void agent.respond([{ requestId, optionId }]);
   }, [agent]);
 
-  const sendSuggestion = useCallback((text: string) => {
+  const sendSuggestion = useCallback((text: string, origin: "coach" | "fallback" | "starter_cta") => {
     if (locked || busy) return;
-    if (!firstText.current) firstText.current = text;
+    if (!firstText.current) { firstText.current = text; track(events.chatStarted, { source: origin }); }
+    track(events.suggestionClicked, { text: text.slice(0, 120), origin });
+    track(events.chatMessageSent, { length: text.length, steer: false, source: origin });
     void agent.send(text);
   }, [agent, busy, locked]);
 
@@ -179,11 +198,11 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
     }
     return null;
   }, [messages]);
-  const suggestions = useMemo(() => {
+  const suggestions = useMemo((): { text: string; origin: "coach" | "fallback" }[] => {
     if (busy || agent.status === "resuming") return [];
     const last = [...messages].reverse().find((message) => message.role === "assistant");
     const fromCoach = last ? parseSuggestions(last.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n")) : [];
-    return fromCoach.length ? fromCoach : fallbackSuggestions;
+    return fromCoach.length ? fromCoach.map((text) => ({ text, origin: "coach" as const })) : fallbackSuggestions.map((text) => ({ text, origin: "fallback" as const }));
   }, [agent.status, busy, fallbackSuggestions, messages]);
 
   return <div className="thread">
@@ -192,7 +211,7 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
       {agent.data.messages.length === 0 && agent.status !== "resuming" ? <div className="chat-empty"><span className="chat-empty-icon">✳</span>
         {starterPrompt ? <>
           <p><b>Start with a policy.</b> {starterPrompt.detail}</p>
-          <button type="button" className="starter-cta" disabled={locked} onClick={() => sendSuggestion(starterPrompt.text)}>{starterPrompt.label} ↗</button>
+          <button type="button" className="starter-cta" disabled={locked} onClick={() => sendSuggestion(starterPrompt.text, "starter_cta")}>{starterPrompt.label} ↗</button>
           <p>Or describe how you want your hero to play and the Coplay Agent turns it into a change to <code>hero.bas</code>.</p>
         </> : <p>Describe how you want your hero to play, ask for a change to <code>hero.bas</code>, or bring back what you noticed in a replay. The Coplay Agent edits, uploads, and plays hosted games for you.</p>}</div> : null}
       {agent.status === "resuming" ? <p className="muted chat-state">Reopening this conversation…</p> : null}
@@ -205,7 +224,7 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
     </div>
     <div className="composer-wrap">
       {suggestions.length ? <div className="suggestions" aria-label="Suggested next asks">
-        {suggestions.map((text) => <button key={text} type="button" className="suggestion" disabled={locked} onClick={() => sendSuggestion(text)}>{text}</button>)}
+        {suggestions.map(({ text, origin }) => <button key={text} type="button" className="suggestion" disabled={locked} onClick={() => sendSuggestion(text, origin)}>{text}</button>)}
       </div> : null}
       <form className="composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
       <textarea className="composer-input" placeholder="Describe a strategy, or tell the Coplay Agent what to change in hero.bas…" value={draft} disabled={locked}

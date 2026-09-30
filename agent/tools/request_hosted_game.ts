@@ -1,5 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { trackServer } from "../../lib/analytics-server";
+import { events } from "../../lib/analytics-events";
 import { insertExperiment, latestPolicyVersion, listExperiments, markPolicyUploaded, policyVersionByRevision } from "../../lib/db";
 import { requestEpisode, uploadPolicy } from "../../lib/softmax";
 import { requireStudentToken } from "../lib/student";
@@ -27,6 +29,7 @@ export default defineTool({
     const experience = await requestEpisode(student.token, policyVersionId, title, `neuralhub-${policyVersionId}-${attempt}`);
     const row = await insertExperiment({ studentId: student.subjectId, policyVersionRowId: version.id, xpRequestId: experience.id, title, hypothesis, status: experience.status });
     await writeExperiment(await ctx.getSandbox(), row);
+    await trackServer(student.subjectId, events.hostedGameRequested, { revision: version.revision_number, attempt, xp_request_id: experience.id, has_hypothesis: !!hypothesis });
     return { xp_request_id: experience.id, status: experience.status, revision: version.revision_number, policy_version_id: policyVersionId, note: "Hosted games usually finish within a few minutes. Call hosted_game_status to read results." };
   },
 });

@@ -30,6 +30,8 @@
     "eve": "^0.68.0",
     "fix-webm-duration": "^1.0.6",
     "next": "^16.3.7",
+    "posthog-js": "^1.435.5",
+    "posthog-node": "^5.55.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",

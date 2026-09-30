@@ -3,6 +3,8 @@ import { z } from "zod";
 import { policyVersionBySoftmaxId } from "../../../lib/db";
 import { currentSession, sameOrigin } from "../../../lib/session";
 import { submitPolicy } from "../../../lib/softmax";
+import { trackServer } from "../../../lib/analytics-server";
+import { events } from "../../../lib/analytics-events";
 
 /** Student-initiated league entry for one of their uploaded revisions. */
 export async function POST(request: Request) {
@@ -12,5 +14,7 @@ export async function POST(request: Request) {
   const { policyVersionId } = z.object({ policyVersionId: z.string().min(1) }).parse(await request.json());
   const version = await policyVersionBySoftmaxId(session.subjectId, policyVersionId);
   if (!version) return NextResponse.json({ error: "Upload a saved revision before entering the league" }, { status: 404 });
-  return NextResponse.json(await submitPolicy(session.token, policyVersionId));
+  const submission = await submitPolicy(session.token, policyVersionId);
+  await trackServer(session.subjectId, events.leagueEntered, { source: "ui", revision: version.revision_number, status: submission.status }, { league_entered: true });
+  return NextResponse.json(submission);
 }

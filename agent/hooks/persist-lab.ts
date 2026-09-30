@@ -1,6 +1,8 @@
 import { defineHook } from "eve/hooks";
 import { studentFromAuth } from "../lib/student";
 import { syncLabFiles } from "../lib/workspace";
+import { trackServer } from "../../lib/analytics-server";
+import { events } from "../../lib/analytics-events";
 
 /** After each turn, save the optimizer-seed lab and memory files so the next session starts from them. */
 export default defineHook({
@@ -8,7 +10,8 @@ export default defineHook({
     async "turn.completed"(_event, ctx) {
       const student = studentFromAuth(ctx.session.auth);
       if (!student) return;
-      await syncLabFiles(await ctx.getSandbox(), student.subjectId);
+      const result = await syncLabFiles(await ctx.getSandbox(), student.subjectId);
+      if (result.synced) await trackServer(student.subjectId, events.labSynced, result);
     },
   },
 });

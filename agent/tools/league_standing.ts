@@ -1,5 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { trackServer } from "../../lib/analytics-server";
+import { events } from "../../lib/analytics-events";
 import { latestPolicyVersion, policyVersionByRevision } from "../../lib/db";
 import { getCompetitionDivision, getLeague, getPolicyLeaderboard } from "../../lib/softmax";
 import { requireStudentToken } from "../lib/student";
@@ -14,6 +16,7 @@ export default defineTool({
     const [league, division] = await Promise.all([getLeague(student.token), getCompetitionDivision(student.token)]);
     const board = (await getPolicyLeaderboard(student.token, division.id)) ?? [];
     const mine = version?.softmax_policy_version_id ? board.find((row) => row.policy_version_id === version.softmax_policy_version_id) ?? null : null;
+    await trackServer(student.subjectId, events.leagueStandingRead, { has_standing: !!mine, win_rate: mine?.win_rate, games: mine?.episodes_played, rank: mine?.rank });
     return {
       league: { name: league.name, rounds_paused: !!league.rounds_paused_at, submissions_locked: !!league.submissions_locked_at },
       window_hours: 72,

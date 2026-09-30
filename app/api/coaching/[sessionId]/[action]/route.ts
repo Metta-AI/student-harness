@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { trackServer } from "../../../../../lib/analytics-server";
+import { events } from "../../../../../lib/analytics-events";
 import { z } from "zod";
 import { currentSession, sameOrigin } from "../../../../../lib/session";
 import { appendCoachingEvents, finishCoachingSession, getCoachingSession, startCoachingAnalysis } from "../../../../../lib/softmax";
@@ -32,5 +34,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     return NextResponse.json(await finishCoachingSession(session.token, sessionId, input));
   }
   const { idempotencyKey } = z.object({ idempotencyKey: z.uuid() }).parse(body);
-  return NextResponse.json(await startCoachingAnalysis(session.token, sessionId, idempotencyKey));
+  const analysis = await startCoachingAnalysis(session.token, sessionId, idempotencyKey);
+  await trackServer(session.subjectId, events.coachingAnalysisRequested, { coaching_session_id: sessionId });
+  return NextResponse.json(analysis);
 }

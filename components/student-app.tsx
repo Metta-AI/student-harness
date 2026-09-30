@@ -8,6 +8,8 @@ import { SemanticPolicy } from "./semantic-policy";
 import { ReplayCoaching } from "./replay-coaching";
 import { Chat, type AnalysisRequest, type ChatReference, type StarterPrompt } from "./chat";
 import { ReplayFrame } from "./replay-frame";
+import { identifyStudent, resetAnalytics, track } from "../lib/analytics";
+import { events } from "../lib/analytics-events";
 
 type WorkspaceVersion = {
   id: string; revision: number; summary: string; created_at: string;
@@ -99,7 +101,10 @@ export function StudentApp({ league }: { league: League }) {
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
-  const rememberSplit = useCallback((layout: Layout) => { try { window.localStorage.setItem(splitKey, JSON.stringify(layout)); } catch { /* storage unavailable */ } }, []);
+  const rememberSplit = useCallback((layout: Layout, meta?: { isUserInteraction?: boolean }) => {
+    try { window.localStorage.setItem(splitKey, JSON.stringify(layout)); } catch { /* storage unavailable */ }
+    if (meta?.isUserInteraction) track(events.splitResized, { chat_percent: Math.round(layout.chat ?? 0) });
+  }, []);
   const [focusCoachingId, setFocusCoachingId] = useState<string | undefined>(undefined);
   const openReference = useCallback((reference: ChatReference) => {
     setActiveTab("episodes");
@@ -108,6 +113,7 @@ export function StudentApp({ league }: { league: League }) {
     setViewer(null);
     setReplayError("");
     setFocusCoachingId(reference.coachingSessionId);
+    track(events.replayOpened, { episode_id: reference.episodeId, run_id: reference.runId, source: "reference" });
     window.setTimeout(() => replayPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }, []);
   const [fullscreen, setFullscreen] = useState(false);
@@ -119,6 +125,7 @@ export function StudentApp({ league }: { league: League }) {
   const toggleFullscreen = useCallback(() => {
     const panel = replayPanelRef.current;
     if (!panel) return;
+    track(events.replayFullscreen, { entering: !document.fullscreenElement });
     if (document.fullscreenElement) void document.exitFullscreen();
     else void panel.requestFullscreen({ navigationUI: "hide" }).catch(() => undefined);
   }, []);
@@ -130,7 +137,7 @@ export function StudentApp({ league }: { league: League }) {
   }, []);
 
   useEffect(() => {
-    fetch("/api/session").then((response) => response.json()).then((data) => setEmail(data.email));
+    fetch("/api/session").then((response) => response.json()).then((data) => { setEmail(data.email); if (data.email && data.subjectId) identifyStudent(data.subjectId, data.email); });
     fetch("/api/starter-policy").then((response) => response.json()).then(setStarterRevision);
   }, []);
 
@@ -316,10 +323,14 @@ export function StudentApp({ league }: { league: League }) {
     if (!response.ok) { setError(data.error ?? "Could not sign in"); return; }
     setToken("");
     setEmail(data.email);
+    if (data.subjectId) identifyStudent(data.subjectId, data.email);
+    track(events.signedIn, {});
   }
 
   async function signOut() {
+    track(events.signedOut, {});
     await fetch("/api/session", { method: "DELETE" });
+    resetAnalytics();
     setEmail(null);
     setWorkspace(null);
     setViewRevision(null);
@@ -345,6 +356,7 @@ export function StudentApp({ league }: { league: League }) {
   async function enterLeague() {
     const policyVersionId = currentUpload?.policyVersionId;
     if (!policyVersionId) return;
+    track(events.leagueEntered, { source: "ui", revision: currentRevision?.ir.update.revision });
     const response = await fetch("/api/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ policyVersionId }) });
     const data = await response.json();
     setSubmission(response.ok ? `Entry ${data.id}: ${data.status}` : data.error ?? "Submission failed");
@@ -352,6 +364,7 @@ export function StudentApp({ league }: { league: League }) {
 
   function downloadPolicy() {
     if (!currentRevision) return;
+    track(events.policyDownloaded, { format: "basic", revision: currentRevision.ir.update.revision });
     const url = URL.createObjectURL(new Blob([currentRevision.source], { type: "text/plain" }));
     const link = document.createElement("a");
     link.href = url;
@@ -363,6 +376,7 @@ export function StudentApp({ league }: { league: League }) {
   function downloadRevision() {
     const revision = currentRevision;
     if (!revision) return;
+    track(events.policyDownloaded, { format: "ir+basic", revision: revision.ir.update.revision });
     const url = URL.createObjectURL(new Blob([JSON.stringify(revision, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -374,6 +388,7 @@ export function StudentApp({ league }: { league: League }) {
   function discussReplay(episode: ArenaEpisode) {
     const note = replayNote.trim();
     if (!note) return;
+    track(events.replayNoteDiscussed, { episode_id: episode.id, note_length: note.length });
     setAnalysisRequest({
       id: Date.now(),
       text: `I watched this replay and noticed: ${note}`,
@@ -387,6 +402,7 @@ export function StudentApp({ league }: { league: League }) {
     const episode = episodes.find((candidate) => candidate.episode_id === item.episode_id) ?? selectedEpisode;
     const when = item.created_at ? new Date(item.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
     const reference: ChatReference | undefined = episode ? { kind: "coaching-session", label: `Match #${(episode.job_index ?? 0) + 1}${when ? ` · recorded ${when}` : ""}`, episodeId: episode.id, runId: episode.run_id, coachingSessionId: item.id } : undefined;
+    if (mode === "apply") track(events.coachingApplied, { coaching_session_id: item.id, episode_id: episode?.id });
     setAnalysisRequest(mode === "apply" ? {
       id: Date.now(),
       text: "Apply my replay coaching to the policy now. Read this coaching session with coaching_feedback, then edit hero.bas so the next revision implements its proposals: turn each proposal into concrete BASIC changes using only host functions from the policy guide, keep the change set focused enough to test in one hosted game, and skip any proposal that does not map onto hero.bas, saying which and why. Save it with save_policy_version citing this coaching session as evidence, upload it, and start one hosted game. Then tell me what changed, line by line, and what result would confirm it worked.",
@@ -412,8 +428,8 @@ export function StudentApp({ league }: { league: League }) {
 
   const workspacePanel = <section className="preview-card">
           <div className="tabs" role="tablist" aria-label="Workspace views">
-            <div><button role="tab" aria-selected={activeTab === "episodes"} className={activeTab === "episodes" ? "active" : ""} onClick={() => setActiveTab("episodes")}>Matches</button>
-              <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} disabled={recordingCoaching} onClick={() => setActiveTab("policy")}>Policy <span className="tab-code">hero.bas</span></button></div>
+            <div><button role="tab" aria-selected={activeTab === "episodes"} className={activeTab === "episodes" ? "active" : ""} onClick={() => { setActiveTab("episodes"); track(events.tabViewed, { tab: "matches" }); }}>Matches</button>
+              <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} disabled={recordingCoaching} onClick={() => { setActiveTab("policy"); track(events.tabViewed, { tab: "policy", revisions: workspace?.versions.length ?? 0 }); }}>Policy <span className="tab-code">hero.bas</span></button></div>
             <span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span>
           </div>
           {activeTab === "policy" ? <div className="policy-view">
@@ -427,7 +443,7 @@ export function StudentApp({ league }: { league: League }) {
             {workspace?.versions.length ? <ol className="version-history" aria-label="Saved revisions">
               <li className={viewRevision === null ? "active" : ""}><button type="button" onClick={() => setViewRevision(null)}><b>Latest</b><span>Working copy · r{workspace.latest?.ir.update.revision ?? 0}</span></button></li>
               {[...workspace.versions].reverse().map((version) => <li key={version.id} className={viewRevision === version.revision ? "active" : ""}>
-                <button type="button" onClick={() => setViewRevision(version.revision)}><b>r{version.revision}</b><span>{version.summary}</span>
+                <button type="button" onClick={() => { setViewRevision(version.revision); track(events.revisionViewed, { revision: version.revision, uploaded: !!version.policyVersionId, games: version.games }); }}><b>r{version.revision}</b><span>{version.summary}</span>
                   <small>{new Date(version.created_at).toLocaleString()}{version.label ? ` · ${version.label}` : " · not uploaded"}{version.scored ? ` · hosted mean ${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(version.hostedMean ?? 0)} over ${version.scored} scored seats` : version.games ? ` · ${version.games} game${version.games === 1 ? "" : "s"} requested` : ""}</small></button>
               </li>)}
             </ol> : <div className="version-empty"><p className="muted">No saved revisions yet. Start by uploading the official starter policy as revision 1, then ask the Coplay Agent for one change at a time. Each save appears here with its hypothesis and results.</p>
@@ -484,7 +500,7 @@ export function StudentApp({ league }: { league: League }) {
                   const score = selectedPolicyId ? policyScore(episode, selectedPolicyId) : episodeScore(episode);
                   const policyId = selectedPolicyId || episodePolicyId(episode);
                   const standing = policyId ? boardByPolicy.get(policyId) : undefined;
-                  return <tr key={episode.id} className={selectedEpisodeId === episode.id ? "selected" : ""} tabIndex={recordingCoaching ? -1 : 0} role="button" aria-disabled={recordingCoaching && selectedEpisodeId !== episode.id} aria-label={`Open replay for ${episode.run_title || "hosted game"}, episode ${(episode.job_index ?? 0) + 1}`} onClick={() => { if (recordingCoaching) return; setSelectedEpisodeId(episode.id); setViewer(null); setReplayError(""); setReplayNote(""); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
+                  return <tr key={episode.id} className={selectedEpisodeId === episode.id ? "selected" : ""} tabIndex={recordingCoaching ? -1 : 0} role="button" aria-disabled={recordingCoaching && selectedEpisodeId !== episode.id} aria-label={`Open replay for ${episode.run_title || "hosted game"}, episode ${(episode.job_index ?? 0) + 1}`} onClick={() => { if (recordingCoaching) return; setSelectedEpisodeId(episode.id); setViewer(null); setReplayError(""); setReplayNote(""); track(events.replayOpened, { episode_id: episode.id, run_id: episode.run_id, status: episode.status, source: "table" }); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
                     <td><strong>#{(episode.job_index ?? 0) + 1}</strong><span>{episode.run_title || "Hosted game"}</span></td>
                     <td className="policy-cell" title={standing?.policy_label ?? policyId ?? "Multiple policies"}>{standing?.policy_label ?? (policyId ? `Policy ${policyId.slice(0, 8)}` : "Mixed")}</td>
                     <td>{new Date(episode.completed_at ?? episode.created_at).toLocaleString()}</td>

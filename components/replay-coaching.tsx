@@ -221,7 +221,7 @@ export function ReplayCoaching({ episode, sessions, replay, onSaved, onDiscuss, 
       </section> : null}
       {analysis ? <section className="coaching-analysis" aria-label="Coaching analysis">
         <div className="coaching-analysis-head"><div><span className="eyebrow">Semantic ↔ symbolic suggestions</span><strong>What the review proposes</strong></div>
-          <button className="coaching-primary" onClick={() => onDiscuss(current!)}>Discuss and update policy ↗</button></div>
+          <button className="coaching-primary" onClick={() => onDiscuss(current!)} title="Starts a chat where the Coplay Agent applies these proposals to hero.bas, saves the revision, uploads it, and plays a hosted game">Discuss and update policy ↗</button></div>
         <p className="coaching-summary">{analysis.summary}</p>
         {analysis.moments.length ? <ol className="coaching-observations">{analysis.moments.map((moment, index) => <li key={index}><button type="button" onClick={() => { if (!recordingRef.current) return; recordingRef.current.currentTime = moment.start_ms / 1000; void recordingRef.current.play(); }}>↳ {Math.floor(moment.start_ms / 60000).toString().padStart(2, "0")}:{Math.floor(moment.start_ms / 1000 % 60).toString().padStart(2, "0")}</button><div><strong>{moment.observation}</strong><p>{moment.coaching_intent}</p></div></li>)}</ol> : null}
         <ol className="coaching-proposals">{analysis.ir_proposals.map((proposal, index) => <li key={index}>

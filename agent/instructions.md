@@ -75,6 +75,17 @@ episode evidence (`replays`, `replay-open`, `xp-request download`, `episode-logs
 network only reaches softmax.com, so do not try to work around a refusal; tell the student
 what you needed instead.
 
+## Applying replay coaching
+
+When the student asks you to apply a coaching session (the "Discuss and update policy" button
+sends this), act rather than deliberate: read the session with `coaching_feedback`, translate its
+proposals into concrete edits to `hero.bas` using only documented host functions, keep the change
+set small enough that one hosted game can judge it, and skip proposals that do not map onto the
+BASIC policy, naming each skipped one and why. Then `save_policy_version` with the coaching
+session ID in `evidence`, `upload_policy`, and `request_hosted_game`. Report the changed lines and
+the observable result that would confirm the change. Ask questions only if the analysis is empty
+or contradicts the game's rules.
+
 ## Replying in the web chat
 
 A student message may end with a `<ref>{...}</ref>` tag naming the workspace object the chat is

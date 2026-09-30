@@ -383,14 +383,20 @@ export function StudentApp({ league }: { league: League }) {
     setReplayNote("");
   }
 
-  function discussCoaching(item: { id: string; created_at?: string; episode_id?: string }) {
+  function discussCoaching(item: { id: string; created_at?: string; episode_id?: string }, mode: "discuss" | "apply" = "discuss") {
     const episode = episodes.find((candidate) => candidate.episode_id === item.episode_id) ?? selectedEpisode;
     const when = item.created_at ? new Date(item.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
-    setAnalysisRequest({
+    const reference: ChatReference | undefined = episode ? { kind: "coaching-session", label: `Match #${(episode.job_index ?? 0) + 1}${when ? ` · recorded ${when}` : ""}`, episodeId: episode.id, runId: episode.run_id, coachingSessionId: item.id } : undefined;
+    setAnalysisRequest(mode === "apply" ? {
+      id: Date.now(),
+      text: "Apply my replay coaching to the policy now. Read this coaching session with coaching_feedback, then edit hero.bas so the next revision implements its proposals: turn each proposal into concrete BASIC changes using only host functions from the policy guide, keep the change set focused enough to test in one hosted game, and skip any proposal that does not map onto hero.bas, saying which and why. Save it with save_policy_version citing this coaching session as evidence, upload it, and start one hosted game. Then tell me what changed, line by line, and what result would confirm it worked.",
+      context: { kind: "coaching-session", coaching_session_id: item.id, hint: "The student asked you to apply the coaching. Do not ask for confirmation first: read the analysis, edit, save with the session as evidence, upload, request one hosted game, then report." },
+      reference,
+    } : {
       id: Date.now(),
       text: "Can we talk through what I noticed in this replay?",
       context: { kind: "coaching-session", coaching_session_id: item.id, hint: "Read this coaching session with coaching_feedback first. Start from one observed moment and ask one question." },
-      reference: episode ? { kind: "coaching-session", label: `Match #${(episode.job_index ?? 0) + 1}${when ? ` · recorded ${when}` : ""}`, episodeId: episode.id, runId: episode.run_id, coachingSessionId: item.id } : undefined,
+      reference,
     });
   }
 
@@ -455,7 +461,7 @@ export function StudentApp({ league }: { league: League }) {
                 <div className="replay-head-actions">
                   <button className="text-button" onClick={toggleFullscreen} aria-pressed={fullscreen}>{fullscreen ? "Exit full screen" : "Full screen ⤢"}</button>
                   <button className="text-button" disabled={recordingCoaching} onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div></div>
-              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && selectedEpisode.episode_id ? <ReplayCoaching key={selectedEpisode.id} episode={selectedEpisode} sessions={coaching.filter((item) => item.episode_id === selectedEpisode.episode_id)} onSaved={() => setRefreshKey((key) => key + 1)} onDiscuss={discussCoaching} onRecordingChange={setRecordingCoaching} focusSessionId={focusCoachingId} replay={<ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} />} /> : viewer?.ready ? <ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
+              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && selectedEpisode.episode_id ? <ReplayCoaching key={selectedEpisode.id} episode={selectedEpisode} sessions={coaching.filter((item) => item.episode_id === selectedEpisode.episode_id)} onSaved={() => setRefreshKey((key) => key + 1)} onDiscuss={(session) => discussCoaching(session, "apply")} onRecordingChange={setRecordingCoaching} focusSessionId={focusCoachingId} replay={<ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} />} /> : viewer?.ready ? <ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
               <div className="replay-footer">
                 <a href={`https://softmax.com/observatory/v2/episode-requests/${selectedEpisode.id}/watch`} target="_blank" rel="noreferrer">Open on Softmax ↗</a>
                 {selectedCoaching?.latest_analysis?.status === "complete" && !viewer?.ready ? <button className="text-button" onClick={() => discussCoaching(selectedCoaching)}>Discuss coaching ↗</button> : null}

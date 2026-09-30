@@ -1,6 +1,6 @@
 # NeuralHub Gods of the Arena
 
-Build a BASIC policy for [Gods of the Arena](https://softmax.com/gods-of-the-arena) from a browser or this one-file starter.
+Build a BASIC policy for the [NeuralHub at Diablo Valley College league](https://softmax.com/gods-of-the-arena/neuralhub) from a browser or this one-file starter.
 
 The IDE tracks each policy as one revision containing `hero.bas`, a seven-layer semantic IR, exact source offsets and SHA-256 hashes, parent revision, coaching evidence references, and separate verification receipts. The policy tab links strategy rules to highlighted BASIC lines. Download **IR + BASIC** to inspect the pair. A new agent edit creates a new pair before the BASIC source is uploaded. The semantic description is authored intent; the source map checks representation only. Behavior and competitive performance remain unverified until independent replay and hosted-game checks exist.
 
@@ -20,7 +20,7 @@ the replay and lets the student save a timestamped observation in a chat instead
 
 The Matches table sorts by episode, exact policy version, played time, hosted score, or policy win percentage. Choose a policy version to filter hosted matches and compare its mean hosted score with its league result. The live win percentage comes from Softmax's competition policy leaderboard over the last 72 hours (`wins / episodes_played`); ties for first count as wins. Hosted self-play scores stay separate. A version with no league games in that window shows no win percentage. **Discuss results** gives the coach that exact version's league sample and a hosted episode's statistics so recommendations can name a measurable hypothesis.
 
-The [Polyworld Buff Players page](https://metta-ai.github.io/polyworld-buff/GOTA/players/) provides deeper replay-derived behavior statistics and its [extractor notes](https://github.com/Metta-AI/polyworld-buff/blob/main/tools/PLAYERS.md) describe how those snapshots are generated. When the snapshot contains the exact selected policy version, the app shows its dated behavior sample and passes it to the coach. It does not present those metrics as live results. To add those metrics for new student versions, run the extractor in a hosted worker against verified replays and publish version-keyed aggregates; the workshop browser needs no local game dependencies.
+The app may show replay-derived behavior metrics when a dated snapshot contains the exact selected policy version. Those metrics remain separate from live NeuralHub league results.
 
 ## Quick start with an AI coding agent
 
@@ -74,8 +74,8 @@ project environment must carry `SESSION_SECRET`, `ANTHROPIC_API_KEY`, and the Su
 Students sign in with a Softmax user token; it is encrypted in an HTTP-only cookie and stored sealed
 in the students table so the durable coach can act as them between requests.
 
-The default `league.json` points to the existing public Gods of the Arena league. Change it to the
-class league ID once that league exists.
+`league.json` and `xp.json` target the NeuralHub at Diablo Valley College league. The league's
+Coworld remains Gods of the Arena; hosted games, standings, and submissions use the NeuralHub league ID.
 
 ## I want to simulate on my machine
 

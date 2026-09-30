@@ -30,7 +30,7 @@ export default defineTool({
       return { sessions: sessions.map((session) => ({ id: session.id, episode_id: session.episode_id, status: session.status, created_at: session.created_at, analysis: session.latest_analysis?.status ?? null, summary: session.feed?.summary ?? null })) };
     }
     const coaching = await getCoachingSession(student.token, coaching_session_id);
-    if (coaching.user_id !== student.subjectId || coaching.coworld_name !== league.name) throw new Error("This coaching session is not the student's.");
+    if (coaching.user_id !== student.subjectId || coaching.coworld_name !== league.coworldName) throw new Error("This coaching session is not the student's.");
     const analysis = coaching.latest_analysis;
     if (!analysis || analysis.status !== "complete") return { status: analysis?.status ?? "none", note: "The coaching analysis has not finished yet." };
     const result = (await getCoachingAnalysis(student.token, coaching.id, analysis.id)).result;

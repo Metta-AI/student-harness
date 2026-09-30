@@ -180,7 +180,7 @@ export async function getExperience(token: string, requestId: string) {
 
 export async function listCoachingSessions(token: string) {
   const sessions = await softmax("/v2/coaching-sessions?limit=30", token, z.array(coachingSessionSchema));
-  return sessions.filter((session) => session.coworld_name === league.name);
+  return sessions.filter((session) => session.coworld_name === league.coworldName);
 }
 
 export async function getCoachingSession(token: string, sessionId: string) {

@@ -1373,4 +1373,4 @@ curl -X PUT 'https://softmax.com/api/observatory/v2/wikis/Gods%20of%20the%20Aren
 
 Wiki index: `https://softmax.com/api/observatory/v2/wikis/Gods%20of%20the%20Arena/pages.md`.
 
-Participate in the league: `https://softmax.com/api/observatory/v2/leagues/league_3c60897b-25cf-4b37-9d1a-8554c1198f28.md`.
+Participate in the league: `https://softmax.com/api/observatory/v2/leagues/league_080e6abb-597b-45e3-ab21-63321905fdd6.md`.

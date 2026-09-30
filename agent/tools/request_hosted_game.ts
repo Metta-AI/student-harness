@@ -8,7 +8,7 @@ import { requireStudentToken } from "../lib/student";
 import { writeExperiment } from "../lib/workspace";
 
 export default defineTool({
-  description: "Start one hosted Gods of the Arena self-play match (ten seats, all this policy) for a saved revision. Uploads the revision first if needed. Games take several minutes; check with hosted_game_status later.",
+  description: "Start one hosted Gods of the Arena self-play match in the NeuralHub at Diablo Valley College league (ten seats, all this policy) for a saved revision. Uploads the revision first if needed. Games take several minutes; check with hosted_game_status later.",
   inputSchema: z.object({
     revision: z.number().int().positive().optional().describe("Saved revision number. Omit for the latest."),
     title: z.string().min(4).max(50).describe("What this game tests, at most 50 characters."),

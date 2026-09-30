@@ -21,7 +21,7 @@ type Workspace = {
   latest: PolicyRevision | null; latestUpload: { policyVersionId: string; label: string } | null;
 };
 
-type League = { id: string; name: string };
+type League = { id: string; name: string; url: string };
 type ArenaEpisode = {
   id: string; status: string; replay_url: string | null; live_url: string | null;
   episode_id: string | null; error: string | null; job_index: number | null; completed_at: string | null; created_at: string;
@@ -430,7 +430,7 @@ export function StudentApp({ league }: { league: League }) {
           <div className="tabs" role="tablist" aria-label="Workspace views">
             <div><button role="tab" aria-selected={activeTab === "episodes"} className={activeTab === "episodes" ? "active" : ""} onClick={() => { setActiveTab("episodes"); track(events.tabViewed, { tab: "matches" }); }}>Matches</button>
               <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} disabled={recordingCoaching} onClick={() => { setActiveTab("policy"); track(events.tabViewed, { tab: "policy", revisions: workspace?.versions.length ?? 0 }); }}>Policy <span className="tab-code">hero.bas</span></button></div>
-            <span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span>
+            <span className="league-status"><span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span><a className="league-link" href={league.url} target="_blank" rel="noreferrer">NeuralHub league ↗</a></span>
           </div>
           {activeTab === "policy" ? <div className="policy-view">
             <div className="policy-toolbar"><div><span className="eyebrow">Symbolic policy</span><h2>hero.bas</h2>
@@ -450,7 +450,7 @@ export function StudentApp({ league }: { league: League }) {
               {starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : null}</div>}
             {currentRevision ? <SemanticPolicy key={currentRevision.revisionId} revision={currentRevision} /> : <p className="muted policy-loading">Loading hero.bas…</p>}
           </div> : <div className="episodes-view">
-            <div className="episodes-heading"><div><img src="/gota/logo.png" alt="" /><div><h2>Matches</h2><p>{episodes.length} hosted games in {league.name}</p></div></div><a className="text-button" href="https://metta-ai.github.io/polyworld-buff/GOTA/players/" target="_blank" rel="noreferrer">Explore player stats ↗</a></div>
+            <div className="episodes-heading"><div><img src="/gota/logo.png" alt="" /><div><h2>Matches</h2><p>{episodes.length} hosted games in {league.name}</p></div></div></div>
             {pendingExperiments.length ? <div className="job-banner"><span className="status-dot" />
               <span>{pendingExperiments.length === 1 ? `Hosted game running: ${pendingExperiments[0].title}` : `${pendingExperiments.length} hosted games running`}. Results appear here and in the chat when they finish.</span></div> : null}
             {episodes.length ? <section className="policy-performance" aria-label="Policy performance">
@@ -514,7 +514,7 @@ export function StudentApp({ league }: { league: League }) {
   return <main className={`shell${email ? " signed-in" : ""}${email && !narrow ? " split-shell" : ""}`}>
     {!email ? <header className="topbar">
       <a className="brand" href="/">Softmax IDE <span>Beta</span></a>
-      <a className="league-link" href={`https://softmax.com/observatory/v2?tab=leagues&detail=league:${league.id}`} target="_blank" rel="noreferrer">{league.name} ↗</a>
+      <a className="league-link" href={league.url} target="_blank" rel="noreferrer">{league.name} ↗</a>
     </header> : null}
     {!email ? <div className="intro">
       <p className="eyebrow">Diablo Valley College · student arena</p>

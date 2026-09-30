@@ -1,10 +1,11 @@
-# Student policy project
+# NeuralHub student policy project
 
 This repo is for one Gods of the Arena BASIC policy: `hero.bas`. Keep policy changes in that file.
 The web app under `app/`, `components/`, `lib/`, and the eve coach under `agent/` are the hosted harness around it;
 see `README.md` for how the coach, its sandbox, and Supabase fit together.
 
-Read the [policy and host guide](https://softmax.com/gods-of-the-arena/wiki/policy-and-host-surface),
+# Target only the [NeuralHub at Diablo Valley College league](https://softmax.com/gods-of-the-arena/neuralhub)
+(`league_080e6abb-597b-45e3-ab21-63321905fdd6`). Read the [policy and host guide](https://softmax.com/gods-of-the-arena/wiki/policy-and-host-surface),
 the [game rules](https://softmax.com/gods-of-the-arena/wiki/overview), and `league.json` before editing.
 The source was copied from
 [`base.bas`](https://github.com/Metta-AI/polyworld/blob/main/examples/gods_of_the_arena/players/base.bas).

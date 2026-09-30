@@ -18,7 +18,7 @@ The live league ID is in `league.json`; `xp.json` uses it. Replace `POLICY_VERSI
 
 ## Web app
 
-Create `.env.local` from `.env.example`. Set `SESSION_SECRET` to a random 32-byte hex string and set the AI Gateway key.
+Create `.env.local` from `.env.example`. Set `SESSION_SECRET` to a random 32-byte hex string and set an Anthropic API key.
 Run `npm install` and `npm run dev`. Deploy this Next.js project to Vercel from the repo root. Vercel Workflow stores
 running jobs; there is no separate worker or database. The Softmax token is encrypted in an HTTP-only cookie and only
 sent to `softmax.com` by server routes. Each browser session tracks its latest job. The generated file can be downloaded

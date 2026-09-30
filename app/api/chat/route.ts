@@ -1,4 +1,5 @@
 import { ToolLoopAgent } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
 import { NextResponse } from "next/server";
 import { start, getRun } from "workflow/api";
 import { z } from "zod";
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
   }
 
   const agent = new ToolLoopAgent({
-    model: "anthropic/claude-sonnet-5.5",
+    model: anthropic("claude-sonnet-5-5"),
     instructions: `You are a concise Gods of the Arena policy coach for a college workshop.
 The policy is one BASIC file. The student can ask you to build or improve it; that starts a hosted job.
 Explain game strategy using https://softmax.com/gods-of-the-arena/wiki/policy-and-host-surface.

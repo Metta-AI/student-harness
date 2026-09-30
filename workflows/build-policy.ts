@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Output, ToolLoopAgent } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { unseal } from "../lib/session";
 import { requestEpisode, uploadPolicy } from "../lib/softmax";
@@ -15,7 +16,7 @@ async function editPolicy(request: string, previousSource?: string) {
   "use step";
   const source = previousSource ?? (await readFile(join(process.cwd(), "hero.bas"), "utf8"));
   const agent = new ToolLoopAgent({
-    model: "anthropic/claude-sonnet-5.5",
+    model: anthropic("claude-sonnet-5-5"),
     output: Output.object({ schema: editSchema }),
     instructions: `You improve a Gods of the Arena policy written in Polyworld BASIC.
 Make one focused gameplay change. Return an exact substring from the source as "before" and its replacement as "after".

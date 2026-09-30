@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/Metta-AI/student-harness#readme",
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.69",
     "@assistant-ui/react": "^0.15.22",
     "ai": "^7.0.123",
     "next": "^16.3.7",

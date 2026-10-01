@@ -49,6 +49,19 @@ sandbox network reaches only softmax.com, where the student's token is injected 
 upload bucket; the token itself never enters the sandbox. Softmax calls that record history run in the app runtime
 through typed tools.
 
+Students can attach a `.bas` file (up to 64 KiB) or text notes (up to 256 KiB) in chat.
+Pastes over 4,000 characters are stored as text attachments and passed to the agent by ID.
+Both attachments and unsaved policy drafts survive reopened chats in `workspace_files`.
+Drafts carry their parent revision; if another chat saved a newer revision, the old draft is
+restored separately for a deliberate merge. The workspace shows saved, uploaded, and hosted-game
+stages, plus an in-app updates inbox and toasts. The updates inbox is derived from the durable
+revision/game records; read state is kept in the browser.
+
+The daily Eve schedule reconciles hosted-game results and retries a canceled starter game once.
+While a student has the page open, the arena feed also reconciles every 30 seconds. Revision
+comparison uses hosted self-play score with the number of games shown. Hosted episode statistics
+currently expose reward but no death count, so death fields remain blank until Softmax provides it.
+
 Durable state lives in Supabase (`supabase/migrations/0001_workspace.sql`): students and their sealed
 Softmax tokens, policy revisions with the semantic IR pair, hosted-game experiments, and chat sessions.
 Only the server uses the service key; the tables have row level security enabled with no policies.

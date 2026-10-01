@@ -2,8 +2,9 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { trackServer } from "../../lib/analytics-server";
 import { events } from "../../lib/analytics-events";
-import { experimentByXp, insertExperiment, listExperiments, policyVersionBySoftmaxId, updateExperiment, type EpisodeSummary } from "../../lib/db";
-import { getEpisodeStats, getExperience, listExperiences } from "../../lib/softmax";
+import { experimentByXp, insertExperiment, listExperiments, policyVersionBySoftmaxId } from "../../lib/db";
+import { getExperience, listExperiences } from "../../lib/softmax";
+import { reconcileGame, retryCanceledBaseline } from "../../lib/reconcile-games";
 import { requireStudentToken } from "../lib/student";
 import { writeExperiment } from "../lib/workspace";
 
@@ -30,30 +31,11 @@ export default defineTool({
       const matched = versions.find((version) => version !== null) ?? null;
       experiment = await insertExperiment({ studentId: student.subjectId, policyVersionRowId: matched?.id ?? null, xpRequestId: experience.id, title: experience.title ?? "Hosted game", status: experience.status });
     }
-    const episodes: EpisodeSummary[] = experience.episodes.map((episode) => ({
-      id: episode.id, status: episode.status, job_index: episode.job_index, replay_url: episode.replay_url,
-      our_scores: episode.scores.map((score) => score.score),
-      participant_scores: episode.participant_scores, completed_at: episode.completed_at, error: episode.error,
-    }));
-    const completed = experience.episodes.filter((episode) => episode.status === "completed");
-    const stats = await Promise.all(completed.map(async (episode) => ({ episode_id: episode.id, ...(await getEpisodeStats(student.token, episode.id)) })));
-    const scores = episodes.flatMap((episode) => episode.our_scores);
-    const summary = {
-      games_completed: completed.length, games_failed: experience.failed_count,
-      mean_policy_score: scores.length ? scores.reduce((total, score) => total + score, 0) / scores.length : null,
-      episode_stats: stats.map(({ episode_id, steps, game_stats, policy_stats }) => ({
-        episode_id, steps, game_stats,
-        seats: policy_stats.map((seat) => ({ position: seat.position, avg_reward: seat.avg_reward, ...seat.avg_metrics })),
-      })),
-    };
-    const done = experience.status === "completed" || experience.status === "failed";
-    await updateExperiment(experiment.xp_request_id, { status: experience.status, episodes, summary, completed_at: done ? experience.completed_at ?? new Date().toISOString() : null });
+    const { episodes, summary } = await reconcileGame(experiment, student.token);
     const refreshed = await experimentByXp(student.subjectId, experiment.xp_request_id);
     if (refreshed) await writeExperiment(await ctx.getSandbox(), refreshed);
-    await trackServer(student.subjectId, events.hostedGameChecked, { xp_request_id: experiment.xp_request_id, status: experience.status, games_completed: completed.length, games_failed: experience.failed_count, mean_policy_score: summary.mean_policy_score });
-    if (done && experiment.status !== "completed" && experiment.status !== "failed") {
-      await trackServer(student.subjectId, events.hostedGameCompleted, { xp_request_id: experiment.xp_request_id, status: experience.status, games_completed: completed.length, mean_policy_score: summary.mean_policy_score, linked_revision: !!experiment.policy_version_id });
-    }
+    if (refreshed) await retryCanceledBaseline(student.subjectId, student.token, refreshed);
+    await trackServer(student.subjectId, events.hostedGameChecked, { xp_request_id: experiment.xp_request_id, status: experience.status, games_completed: summary.games_completed, games_failed: experience.failed_count, mean_policy_score: summary.mean_policy_score });
     return {
       xp_request_id: experiment.xp_request_id, title: experiment.title, hypothesis: experiment.hypothesis, status: experience.status,
       counts: { pending: experience.pending_count, running: experience.running_count, completed: experience.completed_count, failed: experience.failed_count },

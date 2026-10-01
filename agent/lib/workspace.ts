@@ -50,6 +50,7 @@ export async function commitVersion(sandbox: SandboxSession, version: PolicyVers
   await sandbox.writeTextFile({ path: "hero.bas", content: version.source });
   await sandbox.writeTextFile({ path: `versions/${name}.bas`, content: version.source });
   await sandbox.writeTextFile({ path: `versions/${name}.json`, content: JSON.stringify(versionNote(version, ir, experiments), null, 2) + "\n" });
+  await sandbox.writeTextFile({ path: "CURRENT_REVISION.json", content: JSON.stringify({ revisionId: version.revision_id, sourceSha256: createHash("sha256").update(version.source).digest("hex") }) + "\n" });
   await run(sandbox, `cd /workspace && git add -A && git -c user.name=arena -c user.email=arena@softmax.local commit -q --allow-empty -m ${shellQuote(`${name}: ${version.summary}`)} && git tag -f ${name} >/dev/null`);
 }
 
@@ -72,7 +73,7 @@ export async function syncLabFiles(sandbox: SandboxSession, subjectId: string) {
     if (known.get(path) !== sha256) changed.push({ path, content, sha256 });
   }
   await upsertWorkspaceFiles(subjectId, changed);
-  await deleteWorkspaceFiles(subjectId, [...known.keys()].filter((path) => !seen.has(path)));
+  await deleteWorkspaceFiles(subjectId, [...known.keys()].filter((path) => !path.startsWith("attachments/") && !path.startsWith("draft/") && !seen.has(path)));
   return { synced: changed.length, tracked: seen.size };
 }
 
@@ -82,7 +83,7 @@ export async function syncLabFiles(sandbox: SandboxSession, subjectId: string) {
  * optimizer-seed lab files written back over the freshly cloned seed.
  */
 export async function hydrateWorkspace(sandbox: SandboxSession, subjectId: string | null) {
-  await run(sandbox, "mkdir -p /workspace/versions /workspace/experiments && cd /workspace && git init -q 2>/dev/null || true");
+  await run(sandbox, "mkdir -p /workspace/versions /workspace/experiments /workspace/draft /workspace/attachments && cd /workspace && git init -q 2>/dev/null || true");
   await sandbox.writeTextFile({ path: ".gitignore", content: "optimizer-seed/\n" });
   const versions = subjectId ? await listPolicyVersionsWithSource(subjectId) : [];
   const experiments = subjectId ? await listExperiments(subjectId) : [];
@@ -98,11 +99,18 @@ export async function hydrateWorkspace(sandbox: SandboxSession, subjectId: strin
   }
   for (const experiment of experiments) await writeExperiment(sandbox, experiment);
   const labFiles = subjectId ? await listWorkspaceFiles(subjectId) : [];
-  for (const file of labFiles) await sandbox.writeTextFile({ path: `${SEED_DIR}/${file.path}`, content: file.content });
+  const draftParent = labFiles.find((file) => file.path === "draft/parent.txt")?.content;
+  const currentId = versions.at(-1)?.revision_id ?? base.revisionId;
+  for (const file of labFiles) {
+    if (file.path === "draft/hero.bas") await sandbox.writeTextFile({ path: draftParent === currentId ? "hero.bas" : "draft/conflicting-hero.bas", content: file.content });
+    else if (file.path === "draft/parent.txt") continue;
+    else if (file.path.startsWith("attachments/")) await sandbox.writeTextFile({ path: file.path, content: file.content });
+    else await sandbox.writeTextFile({ path: `${SEED_DIR}/${file.path}`, content: file.content });
+  }
   await sandbox.writeTextFile({ path: "STATUS.md", content: [
     `# Workspace status`, ``,
     `Student: ${subjectId ?? "(local development, no student)"}`,
-    `Saved revisions: ${versions.length} (working copy is r${versions.at(-1)?.revision_number ?? 0})`,
+    `Saved revisions: ${versions.length} (latest is r${versions.at(-1)?.revision_number ?? 0}; ${labFiles.some((file) => file.path === "draft/hero.bas") ? draftParent === currentId ? "unsaved draft restored in hero.bas" : "older unsaved draft at draft/conflicting-hero.bas; merge it into the latest hero.bas before saving" : "working copy matches saved revision"})`,
     `Hosted games checked: ${experiments.length}`,
     `Optimizer lab files restored: ${labFiles.length} (under optimizer-seed/)`,
     ``, `See WORKSPACE.md for the layout.`, ``,

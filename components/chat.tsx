@@ -18,6 +18,7 @@ export type AnalysisRequest = { id: number; text: string; context?: Record<strin
 type ChatRow = { session_id: string; title: string | null; updated_at: string };
 
 const refPattern = /\s*<ref>([\s\S]*?)<\/ref>\s*$/;
+const attachmentPattern = /\s*<attachment>([\s\S]*?)<\/attachment>/g;
 const nextPattern = /\s*<next>([\s\S]*?)<\/next>\s*$/;
 
 /** Serialize a workspace reference into the message so the durable transcript and the agent both carry it. */
@@ -63,6 +64,7 @@ const toolLabels: Record<string, string> = {
   save_policy_version: "Saved a revision", upload_policy: "Uploaded to Softmax", request_hosted_game: "Requested a hosted game",
   hosted_game_status: "Checked a hosted game", list_policy_versions: "Reviewed saved revisions", league_standing: "Read the league",
   coaching_feedback: "Read replay coaching", enter_league: "League entry",
+  load_attachment: "Read an attached file",
 };
 
 function toolLine(part: Extract<EveMessagePart, { type: "dynamic-tool" }>) {
@@ -78,12 +80,13 @@ function toolLine(part: Extract<EveMessagePart, { type: "dynamic-tool" }>) {
 
 function ToolPart({ part, onRespond, disabled }: { part: Extract<EveMessagePart, { type: "dynamic-tool" }>; onRespond: (requestId: string, optionId: string) => void; disabled: boolean }) {
   const { base, detail } = toolLine(part);
+  const display = part.state === "output-error" ? `Failed: ${base.toLowerCase()}` : base;
   const request = part.toolMetadata?.eve?.inputRequest;
   const pending = part.state === "approval-requested" && request;
   const status = part.state === "output-error" ? "failed" : part.state === "output-denied" ? "declined" : part.state === "output-available" ? "done" : part.state === "approval-requested" ? "needs approval" : "running";
   return <div className={`tool-line ${status.replace(" ", "-")}`} title={detail || base}>
     <span className="tool-dot" aria-hidden="true" />
-    <span className="tool-text"><b>{base}</b>{detail ? <code>{detail}</code> : null}</span>
+    <span className="tool-text"><b>{display}</b>{detail ? <code>{detail}</code> : null}</span>
     {part.state === "output-error" ? <em className="tool-error">{part.errorText}</em> : null}
     {pending ? <span className="tool-approve">
       <span>{request.prompt}</span>
@@ -98,8 +101,13 @@ function Message({ message, onRespond, onOpenReference, disabled }: { message: E
   if (message.role === "user") {
     const text = message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n");
     const reference = parseReference(text);
+    const attachments = [...text.matchAll(attachmentPattern)].flatMap((match): { name: string; type: string; bytes: number }[] => {
+      try { const item = JSON.parse(match[1]); return typeof item.name === "string" && typeof item.type === "string" && typeof item.bytes === "number" ? [item] : []; }
+      catch { return []; }
+    });
     return <article className="message user"><span className="message-label">You</span>
-      <p>{text.replace(refPattern, "")}</p>
+      <p>{text.replace(refPattern, "").replace(attachmentPattern, "")}</p>
+      {attachments.map((item, index) => <span key={index} className="message-attachment">{item.type === "policy" ? "BASIC policy" : "Text"} · {item.name} · {Math.ceil(item.bytes / 1024)} KiB</span>)}
       {reference ? <ReferenceChip reference={reference} onOpen={onOpenReference} /> : null}</article>;
   }
   // Group consecutive tool parts so activity reads as one compact list.
@@ -121,13 +129,17 @@ function Message({ message, onRespond, onOpenReference, disabled }: { message: E
 
 export type StarterPrompt = { label: string; text: string; detail: string };
 
-function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenReference, onArchive, fallbackSuggestions, starterPrompt, disabled }: {
+function Thread({ sessionId, initialRequest, onSession, onActivity, onNotice, onOpenReference, onArchive, fallbackSuggestions, starterPrompt, disabled }: {
   sessionId: string | null; initialRequest: AnalysisRequest | null;
   onSession: (sessionId: string, title: string) => void; onActivity: (kind: "tool" | "turn") => void;
+  onNotice: (title: string, detail: string) => void;
   onOpenReference: (reference: ChatReference) => void; onArchive: () => void; fallbackSuggestions: string[];
   starterPrompt: StarterPrompt | null; disabled: boolean;
 }) {
   const [draft, setDraft] = useState("");
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [composerError, setComposerError] = useState("");
+  const [sending, setSending] = useState(false);
   const firstText = useRef<string>(initialRequest?.text ?? "");
   const started = useRef(false);
   const turnStarted = useRef(0);
@@ -143,6 +155,7 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
         const data = event.data as { status?: string; result?: { toolName?: string } } | undefined;
         toolsThisTurn.current += 1;
         track(events.agentToolCompleted, { tool: data?.result?.toolName, status: data?.status });
+        if (data?.status === "failed") onNotice("Policy action failed", `${data.result?.toolName?.replaceAll("_", " ") ?? "Agent tool"} failed. Check chat for the reason; the workspace will show any unsaved draft.`);
       }
       if (event.type === "turn.started") { turnStarted.current = Date.now(); toolsThisTurn.current = 0; }
       if (event.type === "turn.completed") {
@@ -151,7 +164,7 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
       }
       if (event.type === "input.requested") track(events.agentApprovalRequested, {});
     },
-    onError: (error) => track(events.agentError, { message: error.message.slice(0, 200) }),
+    onError: (error) => { track(events.agentError, { message: error.message.slice(0, 200) }); onNotice("Chat could not finish", error.message.slice(0, 200)); },
   });
   const busy = agent.status === "submitted" || agent.status === "streaming";
   const locked = agent.status === "resuming" || disabled;
@@ -167,14 +180,37 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
 
   useEffect(() => { viewport.current?.scrollTo({ top: viewport.current.scrollHeight }); }, [agent.data.messages]);
 
-  const submit = useCallback(() => {
+  const submit = useCallback(async () => {
     const text = draft.trim();
-    if (!text || locked) return;
-    if (!firstText.current) { firstText.current = text; track(events.chatStarted, { source: "composer" }); }
-    setDraft("");
-    track(events.chatMessageSent, { length: text.length, steer: busy, source: "composer" });
-    void agent.send(text, busy ? { turnPolicy: "steer" } : undefined);
-  }, [agent, busy, draft, locked]);
+    if ((!text && !attachment) || locked || sending) return;
+    setSending(true);
+    setComposerError("");
+    try {
+      let message = text;
+      const longPaste = text.length > 4000;
+      if (attachment || longPaste) {
+        const upload = async (name: string, content: string) => {
+          const response = await fetch("/api/attachments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, content }) });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error ?? "Could not attach the file");
+          return { id: data.id as string, type: data.type as string, name, bytes: data.bytes as number };
+        };
+        const files = [];
+        if (attachment) files.push(await upload(attachment.name, await attachment.text()));
+        if (longPaste) files.push(await upload("pasted-message.txt", text));
+        message = `${longPaste ? "I pasted a long message. Please read the attached text." : text || "Please use my attached file."}\n\n${files.map((file) => `<attachment>${JSON.stringify(file)}</attachment>`).join("\n")}`;
+      }
+      if (!firstText.current) { firstText.current = message; track(events.chatStarted, { source: "composer" }); }
+      await agent.send(message, busy ? { turnPolicy: "steer" } : undefined);
+      setDraft("");
+      setAttachment(null);
+      track(events.chatMessageSent, { length: text.length, steer: busy, source: "composer", attachment: !!attachment || longPaste });
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : "Could not send your message");
+    } finally {
+      setSending(false);
+    }
+  }, [agent, attachment, busy, draft, locked, sending]);
 
   const respond = useCallback((requestId: string, optionId: string) => {
     track(events.agentApprovalAnswered, { option: optionId });
@@ -226,19 +262,22 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onOpenRefere
       {suggestions.length ? <div className="suggestions" aria-label="Suggested next asks">
         {suggestions.map(({ text, origin }) => <button key={text} type="button" className="suggestion" disabled={locked} onClick={() => sendSuggestion(text, origin)}>{text}</button>)}
       </div> : null}
-      <form className="composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+      <form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+      {attachment ? <div className="attachment-chip">{attachment.name} · {Math.ceil(attachment.size / 1024)} KiB <button type="button" aria-label="Remove attachment" onClick={() => setAttachment(null)}>×</button></div> : null}
       <textarea className="composer-input" placeholder="Describe a strategy, or tell the Neural Viking Agent what to change in hero.bas…" value={draft} disabled={locked}
         onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} />
+        onPaste={(event) => track(events.chatPasteAttempted, { length: event.clipboardData.getData("text").length })}
+        onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} />
       <div className="composer-footer"><span>{busy ? "Sending now steers the current turn" : "Enter to send · Shift+Enter for a new line"}</span>
-        <span className="composer-buttons">{busy ? <button type="button" className="text-button" onClick={() => void agent.cancel()}>Stop</button> : null}
-          <button type="submit" className="send-button" disabled={locked || !draft.trim()}>Send <span aria-hidden="true">↗</span></button></span></div>
-    </form></div>
+        <span className="composer-buttons"><label className="attach-button" title="Attach a .bas or text file">Attach<input type="file" accept=".bas,.txt,.md,text/plain" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setAttachment(file); setComposerError(""); } event.target.value = ""; }} /></label>{busy ? <button type="button" className="text-button" onClick={() => void agent.cancel()}>Stop</button> : null}
+          <button type="submit" className="send-button" disabled={locked || sending || (!draft.trim() && !attachment)}>{sending ? "Attaching…" : "Send"} <span aria-hidden="true">↗</span></button></span></div>
+    </form>{composerError ? <p className="error composer-error" role="alert">{composerError}</p> : null}<p className="attachment-help">Large pastes become text attachments. BASIC files: 64 KiB max; notes: 256 KiB max.</p></div>
   </div>;
 }
 
-export function Chat({ onActivity, onSignOut, onOpenReference, analysisRequest, suggestions, starterPrompt, recordingCoaching }: {
+export function Chat({ onActivity, onNotice, onSignOut, onOpenReference, analysisRequest, suggestions, starterPrompt, recordingCoaching }: {
   onActivity: (kind: "tool" | "turn") => void; onSignOut: () => void; onOpenReference: (reference: ChatReference) => void;
+  onNotice: (title: string, detail: string) => void;
   analysisRequest: AnalysisRequest | null; suggestions: string[]; starterPrompt: StarterPrompt | null; recordingCoaching: boolean;
 }) {
   const [chats, setChats] = useState<ChatRow[]>([]);
@@ -287,6 +326,6 @@ export function Chat({ onActivity, onSignOut, onOpenReference, analysisRequest, 
         {!chats.length ? <p className="muted thread-empty">Your conversations with the Neural Viking Agent are saved here.</p> : null}
       </div>
     </div>
-    <Thread key={threadKey} sessionId={active} initialRequest={active ? null : request} onSession={onSession} onActivity={onActivity} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} />
+    <Thread key={threadKey} sessionId={active} initialRequest={active ? null : request} onSession={onSession} onActivity={onActivity} onNotice={onNotice} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} />
   </aside>;
 }

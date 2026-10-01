@@ -152,6 +152,11 @@ export async function listExperiments(studentId: string, policyVersionRowId?: st
   return z.array(experimentRow).parse(must(await query, "list experiments"));
 }
 
+export async function listOpenExperiments(limit = 100): Promise<ExperimentRow[]> {
+  const rows = must(await db().from("experiments").select("*").not("status", "in", '(completed,failed)').order("created_at").limit(limit), "list open experiments");
+  return z.array(experimentRow).parse(rows);
+}
+
 export async function experimentByXp(studentId: string, xpRequestId: string): Promise<ExperimentRow | null> {
   const result = await db().from("experiments").select("*").eq("student_id", studentId).eq("xp_request_id", xpRequestId).maybeSingle();
   if (result.error) throw new Error(`load experiment: ${result.error.message}`);
@@ -192,6 +197,12 @@ export type WorkspaceFileRow = z.infer<typeof workspaceFileRow>;
 export async function listWorkspaceFiles(studentId: string): Promise<WorkspaceFileRow[]> {
   const rows = must(await db().from("workspace_files").select("path, content, sha256, updated_at").eq("student_id", studentId).order("path"), "list workspace files");
   return z.array(workspaceFileRow).parse(rows);
+}
+
+export async function workspaceFile(studentId: string, path: string): Promise<WorkspaceFileRow | null> {
+  const result = await db().from("workspace_files").select("path, content, sha256, updated_at").eq("student_id", studentId).eq("path", path).maybeSingle();
+  if (result.error) throw new Error(`load workspace file: ${result.error.message}`);
+  return result.data ? workspaceFileRow.parse(result.data) : null;
 }
 
 export async function upsertWorkspaceFiles(studentId: string, files: { path: string; content: string; sha256: string }[]) {

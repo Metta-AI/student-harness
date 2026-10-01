@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { currentSession } from "../../../lib/session";
 import { getExperience, getLeague, listExperiences } from "../../../lib/softmax";
+import { reconcileStudentGames } from "../../../lib/reconcile-games";
 
 export async function GET() {
   const session = await currentSession();
   if (!session) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
+  await reconcileStudentGames(session.subjectId, session.token);
   const [league, experiences] = await Promise.all([
     getLeague(session.token), listExperiences(session.token),
   ]);

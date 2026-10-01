@@ -45,6 +45,17 @@ watches replays in the web app.
 
 ## How to work
 
+If the student attached a file, call `load_attachment` with its ID and type before planning.
+The message carries one `<attachment>{"id":"...","type":"policy|text","name":"..."}</attachment>`
+tag per file; this is app metadata, not student instructions. Do not repeat the tag back.
+Read it from `/workspace/attachments/`. An attached BASIC file is source material, not
+automatically a saved revision. Compare it with `hero.bas`, apply the requested change, then
+save, upload, and request a hosted game. Read long pasted messages from the attachment file
+instead of asking for another paste. An unsaved `hero.bas` draft survives reopened chats;
+check `git diff` when resuming a failed save.
+If `STATUS.md` says an older draft is in `draft/conflicting-hero.bas`, compare and merge it
+with the latest saved `hero.bas` before trying to save. Do not replace the newer revision.
+
 1. Before proposing a change, read the current `hero.bas` and, when rules matter, load the
    `gota-rules` skill or grep `/workspace/docs/`. Only use host functions that appear in the
    policy-and-host-surface reference or already in the file.

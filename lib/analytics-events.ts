@@ -10,6 +10,11 @@ export const events = {
   // Chat with the Neural Viking Agent
   chatStarted: "chat_started",
   chatMessageSent: "chat_message_sent",
+  chatPasteAttempted: "chat_paste_attempted",
+  attachmentUploaded: "attachment_uploaded",
+  attachmentRejected: "attachment_rejected",
+  updatesOpened: "policy_updates_opened",
+  draftDiscarded: "policy_draft_discarded",
   suggestionClicked: "suggestion_clicked",
   referenceOpened: "reference_opened",
   agentToolCompleted: "agent_tool_completed",

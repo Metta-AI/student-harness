@@ -22,8 +22,7 @@ export default defineTool({
     if (!version) throw new Error("No saved revision to play. Save one with save_policy_version first.");
     let policyVersionId = version.softmax_policy_version_id;
     if (!policyVersionId) {
-      const resolved = await resolvePolicyName(student.subjectId);
-      if (!resolved) throw new Error("This revision is not uploaded and the policy has no name yet. Call upload_policy with policy_name first.");
+      const resolved = await resolvePolicyName(student.subjectId, undefined, version.summary);
       const policy = await uploadPolicy(student.token, student.subjectId, version.source, version.summary, resolved.name);
       policyVersionId = policy.id;
       await markPolicyUploaded(version.id, { policyVersionId, label: `${policy.name}:v${policy.version}` });

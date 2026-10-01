@@ -244,7 +244,7 @@ export async function getEpisodeStats(token: string, episodeId: string) {
  * plus four characters derived from the student so two students can pick the same words.
  */
 export function policyNameFor(subjectId: string, character: string) {
-  const slug = character.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
+  const slug = character.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 35).replace(/-+$/g, "");
   const suffix = createHash("sha256").update(subjectId).digest("hex").slice(0, 4);
   return `${slug || "arena-hero"}-${suffix}`;
 }

@@ -25,6 +25,7 @@ export default defineTool({
       my_revision: version ? { revision: version.revision_number, uploaded_as: version.softmax_policy_label } : null,
       submission: submission ? { id: submission.id, status: submission.status, created_at: submission.created_at, auto_champion: submission.auto_champion } : null,
       league_state: leagueState(version?.softmax_policy_version_id ?? null, !!submission, mine?.episodes_played ?? 0),
+      ranking_metric: "score",
       my_standing: mine ? { rank: mine.rank, wins: mine.wins, games: mine.episodes_played, win_rate: mine.win_rate, score: mine.score } : null,
       entries: board.length,
       note: submission && !mine ? "Submitted, but no games appear in the 72-hour leaderboard yet. Check again after league rounds." : undefined,

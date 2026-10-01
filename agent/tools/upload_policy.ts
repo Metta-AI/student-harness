@@ -11,7 +11,7 @@ export default defineTool({
   description: "Upload a saved revision to Softmax as a policy version under the student's account. Idempotent: re-uploading identical source returns the existing version. Defaults to the latest saved revision.",
   inputSchema: z.object({
     revision: z.number().int().positive().optional().describe("Saved revision number. Omit for the latest."),
-    policy_name: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+){1,4}$/).max(40).optional().describe("Kebab-case playstyle name, such as tower-rush-berserker. Omit to keep the existing name; on a first upload without a name, the tool derives one from the saved gameplay summary. Pass a new name only when intentionally starting a new version lineage. Never include the student's name or email."),
+    policy_name: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(35).optional().describe("Student-chosen public policy name, lowercase with words separated by hyphens; a single word is valid. Omit to keep the existing name; on a first upload without a name, the tool derives one from the saved gameplay summary. Pass a new name only when intentionally starting a new version lineage."),
   }),
   label: { start: ({ revision, policy_name }) => `Upload revision ${revision ?? "latest"} to Softmax${policy_name ? ` as ${policy_name}` : ""}` },
   async execute({ revision, policy_name }, ctx) {

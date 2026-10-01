@@ -17,8 +17,8 @@ a:hover { text-decoration: underline; }
 .league-status { display: inline-flex; align-items: center; gap: 16px; }
 .intro { padding: 70px 0 36px; max-width: 750px; }
 .eyebrow, .section-label { color: #6b6560; text-transform: uppercase; font-size: 11px; letter-spacing: .13em; font-weight: 700; margin: 0 0 12px; }
-h1 { font-size: clamp(42px, 5vw, 68px); letter-spacing: -.055em; line-height: 1.06; margin: 0 0 20px; font-weight: 700; }
-h1 em { font-style: normal; color: #6b6560; }
+.intro h1 { font-size: clamp(42px, 5vw, 68px); letter-spacing: -.055em; line-height: 1.06; margin: 0 0 20px; font-weight: 700; }
+.intro h1 em { font-style: normal; color: #6b6560; }
 .intro > p:last-child { color: #6b6560; font-size: 17px; line-height: 1.55; max-width: 630px; }
 .card { background: #fff; border: 1px solid #e4dac8; border-radius: 12px; }
 .signin { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; padding: 36px; max-width: 900px; }
@@ -104,25 +104,25 @@ h1 em { font-style: normal; color: #6b6560; }
 .draft-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 15px; margin: 0 0 12px; border: 1px solid #d6d3d1; border-radius: 7px; background: #fff; font-size: 11px; }
 .draft-banner span { color: #78716c; }.draft-banner button { margin-left: auto; }
 .revision-comparison { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; margin-bottom: 18px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-.revision-comparison .eyebrow { margin: 0 0 3px; }.revision-comparison p { max-width: 350px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
-.revision-comparison-table { display: grid; grid-template-columns: repeat(4, minmax(62px, auto)); gap: 5px 12px; flex: 1; min-width: 280px; font-size: 10px; }.revision-comparison-table > span { color: var(--muted); }
+.revision-comparison .eyebrow { margin: 0 0 3px; }.revision-comparison p { max-width: 350px; margin: 0; color: var(--muted-ink); font-size: 10px; line-height: 1.4; }
+.revision-comparison-table { display: grid; grid-template-columns: repeat(4, minmax(62px, auto)); gap: 5px 12px; flex: 1; min-width: 280px; font-size: 10px; }.revision-comparison-table > span { color: var(--muted-ink); }
 .revision-comparison-row { display: contents; }.revision-comparison-row > * { font-size: 11px; }
 .send-button { min-width: 67px; min-height: 33px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-size: 11px; padding: 6px 10px; }
 .send-button:disabled { opacity: .4; cursor: not-allowed; }
-.preview-card { --paper: #fffdf4; --ink: #111827; --line: #e4dac8; --muted: #6b6560; position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--paper); color: var(--ink); font-family: "ABC Marfa", ui-sans-serif, system-ui, sans-serif; }
+.preview-card { --paper: #fffdf4; --ink: #111827; --line: #e4dac8; --muted-ink: #6b6560; position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--paper); color: var(--ink); font-family: "ABC Marfa", ui-sans-serif, system-ui, sans-serif; }
 .tabs { display: flex; justify-content: space-between; align-items: center; flex: none; padding: 0 32px; min-height: 56px; border-bottom: 1px solid var(--line); background: #fffaf0; }
 .tabs > div { display: flex; align-self: stretch; gap: 26px; }
-.tabs button { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); padding: 1px 0 0; font-size: 13px; }
+.tabs button { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted-ink); padding: 1px 0 0; font-size: 13px; }
 .tabs button.active { border-bottom-color: #0e2758; color: var(--ink); }
 .tab-code { color: #8a8580; font: 11px "Marfa Mono", monospace; margin-left: 5px; }
-.sync-label { color: var(--muted); font: 11px "Marfa Mono", monospace; white-space: nowrap; }
+.sync-label { color: var(--muted-ink); font: 11px "Marfa Mono", monospace; white-space: nowrap; }
 .live-indicator { display: inline-block; width: 6px; height: 6px; margin-left: 8px; background: #5573a0; border-radius: 50%; vertical-align: middle; }
 .episodes-view { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 32px 44px; }
 .episodes-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .episodes-heading > div { display: flex; align-items: center; gap: 13px; min-width: 0; }
 .episodes-heading img { width: 53px; height: 45px; object-fit: contain; }
 .episodes-heading h2 { margin: 0; font-size: 24px; font-weight: 500; letter-spacing: -.035em; }
-.episodes-heading p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.episodes-heading p { margin: 2px 0 0; color: var(--muted-ink); font-size: 12px; }
 .policy-performance { margin-bottom: 20px; border: 1px solid var(--line); border-radius: 8px; background: #fffaf0; }
 .performance-top { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .performance-top .eyebrow { display: block; margin: 0 0 4px; color: #945637; font: 10px "Marfa Mono", monospace; }
@@ -132,23 +132,23 @@ h1 em { font-style: normal; color: #6b6560; }
 .performance-values > div { min-width: 0; padding: 17px 16px; border-right: 1px solid var(--line); }
 .performance-values > div:last-child { border-right: 0; }
 .performance-values strong { display: block; font: 20px "Marfa Mono", monospace; }
-.performance-values span { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.performance-values span { display: block; margin-top: 5px; color: var(--muted-ink); font-size: 10px; line-height: 1.4; }
 .snapshot-metrics { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; padding: 11px 16px; border-top: 1px solid var(--line); background: #f7f4ec; }
 .snapshot-metrics > div:first-child { min-width: 200px; margin-right: auto; }
 .snapshot-metrics strong, .snapshot-metrics b { display: block; font-size: 11px; }
-.snapshot-metrics span { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; text-transform: capitalize; }
+.snapshot-metrics span { display: block; margin-top: 3px; color: var(--muted-ink); font-size: 9px; text-transform: capitalize; }
 .performance-bottom { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 10px 16px; border-top: 1px solid var(--line); }
-.performance-bottom span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.performance-bottom span { color: var(--muted-ink); font-size: 10px; line-height: 1.5; }
 .performance-bottom button:disabled { opacity: .5; cursor: not-allowed; }
 .policy-performance .error { padding: 0 16px 10px; font-size: 11px; }
 .job-banner { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; margin-bottom: 18px; border: 1px solid var(--line); border-left: 2px solid #5573a0; border-radius: 5px; background: #eef2f7; font-size: 12px; line-height: 1.5; }
 .status-dot { flex: none; width: 6px; height: 6px; margin-top: 5px; background: #5573a0; border-radius: 50%; }
-.muted { color: var(--muted); font-size: 12px; }
-.empty-games { padding: 28px 20px; border: 1px solid var(--line); border-radius: 7px; background: #fffaf0; color: var(--muted); font-size: 12px; }
+.muted { color: var(--muted-ink, #6b6560); font-size: 12px; }
+.empty-games { padding: 28px 20px; border: 1px solid var(--line); border-radius: 7px; background: #fffaf0; color: var(--muted-ink); font-size: 12px; }
 .empty-games p { margin: 0; }
 .episode-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #fffaf0; }
 .episode-table { width: 100%; border-collapse: collapse; text-align: left; }
-.episode-table th { padding: 0; border-bottom: 1px solid var(--line); color: var(--muted); font: 10px "Marfa Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
+.episode-table th { padding: 0; border-bottom: 1px solid var(--line); color: var(--muted-ink); font: 10px "Marfa Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
 .episode-table th button { width: 100%; border: 0; padding: 11px 17px; background: transparent; color: inherit; text-align: left; text-transform: inherit; letter-spacing: inherit; font: inherit; white-space: nowrap; }
 .episode-table th button:hover { color: #1a3875; background: #f1ede3; }
 .episode-table th[aria-sort="ascending"], .episode-table th[aria-sort="descending"] { color: #1a3875; }
@@ -165,7 +165,7 @@ h1 em { font-style: normal; color: #6b6560; }
 .episode-table .score-cell { color: #0e2758; font: 12px "Marfa Mono", monospace; }
 .episode-table .win-cell { color: #0e2758; font: 12px "Marfa Mono", monospace; }
 .episode-table .policy-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; font: 11px "Marfa Mono", monospace; }
-.episode-status { color: var(--muted); text-transform: capitalize; }
+.episode-status { color: var(--muted-ink); text-transform: capitalize; }
 .episode-status.completed { color: #1a3875; }
 .row-arrow { float: right; margin-left: 16px; color: #1a3875; }
 .replay-panel { margin-bottom: 22px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fffaf0; }
@@ -174,19 +174,19 @@ h1 em { font-style: normal; color: #6b6560; }
 .replay-head .eyebrow { display: block; margin: 0 0 3px; color: #945637; font: 10px "Marfa Mono", monospace; }
 .replay-head strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
 .replay-frame { display: block; width: 100%; height: clamp(300px, 45vw, 550px); border: 0; background: #171717; }
-.replay-state { display: grid; place-items: center; min-height: 230px; background: #f8f6ef; color: var(--muted); font-size: 13px; }
+.replay-state { display: grid; place-items: center; min-height: 230px; background: #f8f6ef; color: var(--muted-ink); font-size: 13px; }
 .replay-state.error { color: #9c2929; }
 .replay-footer { display: flex; gap: 18px; flex-wrap: wrap; padding: 11px 16px; border-top: 1px solid var(--line); }
 .replay-footer a, .replay-footer button { color: #1a3875; font-size: 11px; }
 .replay-metrics { padding: 10px 16px; border-top: 1px solid var(--line); font-size: 11px; }
 .replay-metrics summary { cursor: pointer; font-weight: 600; }
-.replay-metrics summary span { margin-left: 8px; color: var(--muted); font-weight: 400; }
+.replay-metrics summary span { margin-left: 8px; color: var(--muted-ink); font-weight: 400; }
 .replay-metrics > div { display: flex; flex-wrap: wrap; gap: 7px; padding: 10px 0 2px; }
-.replay-metrics > div span { border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px; color: var(--muted); }
+.replay-metrics > div span { border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px; color: var(--muted-ink); }
 .replay-metrics > div b { color: var(--ink); }
 .replay-metrics-error { padding: 8px 16px; font-size: 11px; }
 .replay-note-box { padding: 0 16px 16px; }
-.replay-note-box label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 11px; }
+.replay-note-box label { display: block; margin-bottom: 7px; color: var(--muted-ink); font-size: 11px; }
 .replay-note-box > div { display: flex; align-items: flex-end; gap: 8px; }
 .replay-note-box textarea { flex: 1; min-height: 52px; max-height: 100px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: #fffdf4; font-size: 12px; }
 .replay-note-box button:disabled { opacity: .45; cursor: not-allowed; }
@@ -200,7 +200,7 @@ h1 em { font-style: normal; color: #6b6560; }
 .recording-pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #d6d3d1; border-radius: 99px; padding: 5px 9px; font-size: 11px; }
 .recording-pill span { width: 7px; height: 7px; border-radius: 50%; background: #b63b30; }
 .coaching-start { display: grid; justify-items: start; gap: 10px; margin-top: 12px; }
-.coaching-start p, .coaching-status, .coaching-analysis p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.coaching-start p, .coaching-status, .coaching-analysis p { margin: 0; color: var(--muted-ink); font-size: 12px; line-height: 1.5; }
 .coaching-start textarea, .coaching-note textarea { width: 100%; min-height: 60px; border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 10px; resize: vertical; font-size: 12px; }
 .coaching-primary, .coaching-controls button { border: 1px solid #171717; border-radius: 6px; padding: 8px 11px; background: #171717; color: #fff; font-size: 12px; font-weight: 600; }
 .coaching-controls { margin-top: 14px; }
@@ -247,22 +247,22 @@ h1 em { font-style: normal; color: #6b6560; }
 .policy-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 28px 32px 17px; }
 .policy-toolbar .eyebrow { color: #945637; font: 10px "Marfa Mono", monospace; margin-bottom: 8px; }
 .policy-toolbar h2 { margin: 0; font-size: 24px; font-weight: 500; letter-spacing: -.03em; }
-.policy-toolbar p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+.policy-toolbar p { margin: 5px 0 0; color: var(--muted-ink); font-size: 12px; }
 .policy-actions { display: flex; gap: 8px; }
-.submission { margin: 0 32px 10px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.submission { margin: 0 32px 10px; color: var(--muted-ink); font-size: 11px; overflow-wrap: anywhere; }
 .policy-loading { padding: 0 32px; }
 .policy-pair { display: grid; grid-template-columns: minmax(280px, 35%) minmax(0, 1fr); flex: 1; min-height: 0; margin: 0 32px 24px; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: #fffaf0; }
 .semantic-pane { min-width: 0; min-height: 0; overflow-y: auto; border-right: 1px solid var(--line); background: #fffdf7; }
 .semantic-heading { padding: 19px 18px 14px; border-bottom: 1px solid var(--line); }
 .semantic-heading .eyebrow { margin-bottom: 6px; }
 .semantic-heading strong { display: block; font-size: 16px; font-weight: 600; }
-.semantic-heading p { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.semantic-heading p { margin: 8px 0 0; color: var(--muted-ink); font-size: 11px; line-height: 1.5; }
 .semantic-receipts { display: flex; flex-wrap: wrap; gap: 5px; padding: 12px 15px; border-bottom: 1px solid var(--line); }
 .semantic-receipts span { border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; color: #655f57; font: 9px "Marfa Mono", monospace; }
 .semantic-layers details { border-bottom: 1px solid var(--line); }
 .semantic-layers summary, .strategy-title { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 11px 16px; font-size: 12px; font-weight: 600; cursor: pointer; }
 .semantic-layers summary small, .strategy-title small { color: #8a8580; font: 10px "Marfa Mono", monospace; }
-.semantic-layers details p { margin: 0; padding: 0 16px 10px; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.semantic-layers details p { margin: 0; padding: 0 16px 10px; color: var(--muted-ink); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .semantic-layers details p b { color: var(--ink); font-family: "Marfa Mono", monospace; font-size: 10px; }
 .semantic-layers details code { font: 10px "Marfa Mono", monospace; overflow-wrap: anywhere; }
 .strategy-list { border-bottom: 1px solid var(--line); }
@@ -273,10 +273,10 @@ h1 em { font-style: normal; color: #6b6560; }
 .strategy-rule > span:first-child { display: flex; justify-content: space-between; gap: 7px; align-items: baseline; }
 .strategy-rule b { font: 10px "Marfa Mono", monospace; text-transform: capitalize; }
 .strategy-rule small { color: #736d66; font: 9px "Marfa Mono", monospace; white-space: nowrap; }
-.strategy-rule > span:last-child { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.strategy-rule > span:last-child { display: block; margin-top: 4px; color: var(--muted-ink); font-size: 11px; line-height: 1.4; }
 .symbolic-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .symbolic-heading { display: flex; justify-content: space-between; flex: none; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); font: 10px "Marfa Mono", monospace; }
-.symbolic-heading span:last-child { color: var(--muted); }
+.symbolic-heading span:last-child { color: var(--muted-ink); }
 .basic-editor { flex: 1; min-height: 0; overflow: auto; padding: 9px 0 20px; }
 .basic-lines { width: max-content; min-width: 100%; }
 .basic-line { display: flex; width: 100%; min-height: 18px; border: 0; padding: 0 14px 0 0; text-align: left; background: transparent; color: #252525; font: 11px/18px "Marfa Mono", ui-monospace, monospace; white-space: pre; tab-size: 2; }
@@ -346,7 +346,7 @@ h1 em { font-style: normal; color: #6b6560; }
 .version-history li.active button { background: #f3f1eb; }
 .version-history li b { font-family: "Marfa Mono", ui-monospace, Menlo, monospace; font-size: 12px; font-weight: 650; }
 .version-history li span { font-size: 13px; }
-.version-history li small { grid-column: 2; color: var(--muted); font-size: 11px; }
+.version-history li small { grid-column: 2; color: var(--muted-ink); font-size: 11px; }
 .version-empty { font-size: 13px; margin: 0 0 18px; max-width: 560px; }
 
 /* Replay viewer readiness */
@@ -378,10 +378,10 @@ h1 em { font-style: normal; color: #6b6560; }
 .coaching-summary { max-width: 72ch; margin: 12px 0 0 !important; font-size: 13px !important; line-height: 1.55 !important; color: var(--ink) !important; }
 .coaching-proposals { list-style: none; margin: 14px 0 0; padding: 0; column-width: 320px; column-gap: 32px; }
 .coaching-proposals li { display: grid; grid-template-columns: 26px 1fr; gap: 10px; break-inside: avoid; margin-bottom: 16px; }
-.proposal-index { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font: 600 11px "Marfa Mono", monospace; color: var(--muted); }
+.proposal-index { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font: 600 11px "Marfa Mono", monospace; color: var(--muted-ink); }
 .proposal-body small { display: block; color: #945637; font: 10px "Marfa Mono", monospace; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 3px; }
 .proposal-body strong { display: block; font-size: 13px; font-weight: 600; line-height: 1.4; }
-.proposal-body p { margin: 5px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.proposal-body p { margin: 5px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted-ink); }
 .proposal-body span { display: block; margin-top: 5px; font-size: 11.5px; color: #57534e; }
 .replay-panel:fullscreen .coaching-workspace { display: flex; }
 
@@ -429,3 +429,82 @@ h1 em { font-style: normal; color: #6b6560; }
 .split-pane > .chat-rail { height: auto; }
 .shell.split-shell { height: 100dvh; overflow: hidden; }
 .split-handle { width: 8px; }
+
+/* Compact density: the IDE is a working surface, so chrome and section padding stay tight. */
+.rail-top { min-height: 38px; padding: 0 14px; }
+.thread-list { padding: 6px 8px 4px; }
+.thread-list-header { margin: 0 6px 4px; }
+.new-thread { padding: 3px 8px; border-radius: 3px; }
+.new-thread span { font-size: 14px; }
+.thread-items { max-height: min(16vh, 104px); }
+.thread-item { padding: 0 2px; border-radius: 3px; }
+.thread-trigger { padding: 4px 6px; font-size: 12.5px; }
+.thread-archive { padding: 2px 6px; font-size: 16px; }
+.thread-empty { margin: 2px 6px 4px; }
+.tabs { min-height: 38px; padding: 0 18px; }
+.tabs > div { gap: 20px; }
+.league-status { gap: 12px; }
+.policy-stages { gap: 5px; padding: 6px 18px; }
+.policy-stages span { padding: 2px 8px; }
+.policy-toolbar { padding: 12px 18px 8px; gap: 14px; }
+.policy-toolbar .eyebrow { margin-bottom: 3px; }
+.policy-toolbar h2 { font-size: 18px; }
+.policy-toolbar p { margin-top: 2px; }
+.submission { margin: 0 18px 6px; }
+.policy-loading { padding: 0 18px; }
+.policy-pair { margin: 0 18px 14px; }
+.draft-banner { padding: 6px 10px; margin-bottom: 8px; }
+.revision-comparison { padding: 8px 12px; margin-bottom: 10px; gap: 8px 16px; }
+.semantic-heading { padding: 10px 12px 8px; }
+.semantic-heading .eyebrow { margin-bottom: 3px; }
+.semantic-heading strong { font-size: 14px; }
+.semantic-heading p { margin-top: 4px; }
+.semantic-receipts { padding: 7px 12px; gap: 4px; }
+.semantic-receipts span { padding: 2px 5px; }
+.semantic-layers summary, .strategy-title { padding: 6px 12px; }
+.semantic-layers details p { padding: 0 12px 7px; }
+.strategy-rule { padding: 6px 12px; }
+.symbolic-heading { padding: 7px 12px; }
+.basic-editor { padding: 6px 0 12px; }
+.episodes-view { padding: 12px 18px 20px; }
+.episodes-heading { margin-bottom: 10px; gap: 12px; }
+.episodes-heading > div { gap: 10px; }
+.episodes-heading img { width: 38px; height: 32px; }
+.episodes-heading h2 { font-size: 18px; }
+.episodes-heading p { margin-top: 0; }
+.empty-games { padding: 12px 14px; }
+.policy-performance { margin-bottom: 12px; }
+.performance-top { padding: 8px 12px; gap: 12px; }
+.performance-top select { padding: 4px 8px; }
+.performance-values > div { padding: 9px 12px; }
+.performance-values strong { font-size: 17px; }
+.performance-values span { margin-top: 2px; }
+.snapshot-metrics { padding: 6px 12px; }
+.performance-bottom { padding: 6px 12px; }
+.job-banner { padding: 8px 12px; margin-bottom: 10px; }
+.episode-table th button { padding: 6px 12px; }
+.episode-table td { padding: 6px 12px; }
+.replay-panel { margin-bottom: 12px; }
+.replay-head { padding: 7px 12px; }
+.replay-footer { padding: 6px 12px; gap: 14px; }
+.replay-metrics { padding: 6px 12px; }
+.replay-note-box { padding: 0 12px 10px; }
+.replay-note-box label { margin-bottom: 4px; }
+.replay-note-box textarea { min-height: 40px; padding: 6px 8px; }
+.coaching-widget { padding: 12px 14px 6px; gap: 12px 24px; }
+.coaching-start { margin-top: 8px; gap: 6px; }
+.coaching-controls { margin-top: 8px; }
+.coaching-note { margin-top: 8px; }
+.coaching-status, .coaching-error { margin-top: 8px; }
+.coaching-review-body { gap: 12px; margin-top: 8px; }
+.coaching-saved-notes { margin-top: 8px; }
+.coaching-analysis { margin-top: 10px; }
+.coaching-analysis > p { margin: 4px 0 8px; }
+.coaching-analysis article { padding: 7px 0; }
+.coaching-observations { margin: 10px 0; }
+.coaching-observations li { padding: 6px 0; }
+.notice-panel { top: 40px; right: 14px; padding: 8px; }
+.notice-row { padding: 6px 4px; }
+.version-history { margin-bottom: 10px; gap: 0; }
+.version-history li button { padding: 4px 8px; border-radius: 3px; gap: 0 10px; }
+.version-empty { margin-bottom: 10px; }

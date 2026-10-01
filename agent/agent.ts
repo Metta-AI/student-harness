@@ -3,6 +3,7 @@ import { anthropic } from "eve/models/anthropic";
 
 export default defineAgent({
   model: anthropic("claude-sonnet-5-5"),
+  reasoning: "medium",
   compaction: { thresholdPercent: 0.8 },
   limits: {
     // One workshop conversation should never run away with spend.

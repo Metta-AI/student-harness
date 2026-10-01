@@ -1,155 +1,212 @@
 "use client";
 
-import { useEveAgent, type EveMessage, type EveMessagePart } from "eve/react";
+import { useEveAgentRuntime, useEveError } from "@assistant-ui/eve";
+import { AssistantRuntimeProvider, AuiConfig, Tools, useAui, useAuiEvent, useAuiState, type AssistantRuntime } from "@assistant-ui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Markdown from "react-markdown";
+import { ConnectionState, type ConnectionPhase } from "@/components/assistant-ui/elements/connection-state";
+import { Thread } from "@/components/assistant-ui/elements/thread.aui";
+import { toolkit } from "@/components/assistant-ui/toolkit";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { track } from "../lib/analytics";
 import { events } from "../lib/analytics-events";
+import { createChatAdapters } from "./chat-adapters";
+import { ChatThreadProvider, ReferenceChip, parseReference, refPattern, studentText, useChatThread, withReference, type AnalysisRequest, type ChatReference, type ChatThreadValue, type StarterPrompt, type SuggestionOrigin } from "./chat-context";
 
-export type ChatReference = {
-  kind: "coaching-session" | "replay-note" | "policy-results";
-  label: string;
-  episodeId: string;
-  runId: string;
-  coachingSessionId?: string;
-  policyVersionId?: string;
-};
-export type AnalysisRequest = { id: number; text: string; context?: Record<string, string>; reference?: ChatReference };
+export { withReference };
+export type { AnalysisRequest, ChatReference, StarterPrompt };
+
 type ChatRow = { session_id: string; title: string | null; updated_at: string };
 
-const refPattern = /\s*<ref>([\s\S]*?)<\/ref>\s*$/;
-const attachmentPattern = /\s*<attachment>([\s\S]*?)<\/attachment>/g;
-const nextPattern = /\s*<next>([\s\S]*?)<\/next>\s*$/;
+const toolConfig = AuiConfig({ tools: Tools({ toolkit }) });
+const activeChatKey = "softmax-ide-active-chat";
+const sessionGone = /no longer active|session_not_active|not found/i;
 
-/** Serialize a workspace reference into the message so the durable transcript and the agent both carry it. */
-export function withReference(text: string, reference: ChatReference) {
-  return `${text}\n\n<ref>${JSON.stringify(reference)}</ref>`;
+const userText = (message: { content: readonly { type: string; text?: string }[] }) => message.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
+
+/** Sends the prompt a workspace action prepared (coaching, replay notes, policy results) once the thread mounts. */
+function InitialRequest({ request, sendPrompt }: { request: AnalysisRequest | null; sendPrompt: (text: string, context?: Record<string, string>) => void }) {
+  const sent = useRef(false);
+  useEffect(() => {
+    if (!request || sent.current) return;
+    sent.current = true;
+    sendPrompt(request.reference ? withReference(request.text, request.reference) : request.text, request.context);
+  }, [request, sendPrompt]);
+  return null;
 }
 
-function parseReference(text: string): ChatReference | null {
-  const match = refPattern.exec(text);
-  if (!match) return null;
-  try {
-    const value = JSON.parse(match[1]) as Partial<ChatReference>;
-    if (!value.kind || !value.label || !value.episodeId || !value.runId) return null;
-    return value as ChatReference;
-  } catch {
-    return null;
+function Welcome() {
+  const { starterPrompt, resuming, sendPrompt } = useChatThread();
+  if (resuming) {
+    return (
+      <div role="status" className="flex flex-col gap-y-5 px-2 pb-6">
+        <span className="text-muted-foreground text-xs">Reopening this conversation</span>
+        <Skeleton className="ml-auto h-8 w-2/5 motion-reduce:animate-none" />
+        <div className="flex flex-col gap-y-2">
+          <Skeleton className="h-3.5 w-11/12 motion-reduce:animate-none" />
+          <Skeleton className="h-3.5 w-4/5 motion-reduce:animate-none" />
+          <Skeleton className="h-3.5 w-3/5 motion-reduce:animate-none" />
+        </div>
+      </div>
+    );
   }
+  return (
+    <div className="mb-4 flex flex-col gap-2 px-2">
+      {starterPrompt ? (
+        <>
+          <p className="text-[15px] leading-snug font-semibold tracking-tight">Start with a policy.</p>
+          <p className="text-muted-foreground text-[13px] leading-relaxed">{starterPrompt.detail}</p>
+          <button
+            type="button"
+            onClick={() => sendPrompt(starterPrompt.text, "starter_cta")}
+            className="bg-primary text-primary-foreground hover:bg-accent-foreground focus-visible:ring-ring w-fit rounded-md px-3.5 py-2 text-[13px] font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:bg-primary/90"
+          >
+            {starterPrompt.label} <span aria-hidden="true">↗</span>
+          </button>
+          <p className="text-muted-foreground text-[13px] leading-relaxed">
+            Or describe how you want your hero to play and the Neural Viking Agent turns it into a change to <code className="text-foreground text-xs">hero.bas</code>.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-[15px] leading-snug font-semibold tracking-tight">What should your hero do differently?</p>
+          <p className="text-muted-foreground text-[13px] leading-relaxed">
+            Describe a strategy, ask for a change to <code className="text-foreground text-xs">hero.bas</code>, or bring back what you noticed in a replay. Attach a policy file or a screenshot, or dictate with the microphone. The Neural Viking Agent edits, uploads, and plays hosted games for you.
+          </p>
+        </>
+      )}
+    </div>
+  );
 }
 
-function parseSuggestions(text: string): string[] {
-  const match = nextPattern.exec(text);
-  if (!match) return [];
-  try {
-    const value = JSON.parse(match[1]) as unknown;
-    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 4);
-  } catch {
-    return match[1].split("\n").map((line) => line.replace(/^[-*\d.\s]+/, "").trim()).filter(Boolean).slice(0, 4);
-  }
-  return [];
+/** The workspace object this conversation is about, pinned above the transcript. */
+function ThreadAbout() {
+  const { onOpenReference } = useChatThread();
+  const raw = useAuiState((s) => {
+    for (const message of s.thread.messages) {
+      if (message.role !== "user") continue;
+      const match = refPattern.exec(userText(message));
+      if (match) return match[0];
+    }
+    return "";
+  });
+  const reference = raw ? parseReference(raw) : null;
+  if (!reference) return null;
+  return (
+    <div className="border-border flex items-center gap-2.5 border-b px-3 py-1.5">
+      <span className="text-muted-foreground text-[10px] font-bold tracking-[0.1em] uppercase">About</span>
+      <ReferenceChip reference={reference} onOpen={onOpenReference} />
+    </div>
+  );
 }
 
-const referenceKindLabel: Record<ChatReference["kind"], string> = { "coaching-session": "Coaching session", "replay-note": "Replay note", "policy-results": "Policy results" };
+/**
+ * eve keeps the run going on the server when the tab reloads or the network drops. This reports
+ * the reconnect: a resumed in-flight reply after a reload, and offline or back-online transitions.
+ */
+function StreamStatus({ resumed, sentHere, reconnect }: { resumed: boolean; sentHere: () => boolean; reconnect: () => Promise<void> }) {
+  const running = useAuiState((s) => s.thread.isRunning);
+  const [phase, setPhase] = useState<ConnectionPhase>("online");
+  const announced = useRef(false);
 
-function ReferenceChip({ reference, onOpen }: { reference: ChatReference; onOpen: (reference: ChatReference) => void }) {
-  return <button type="button" className="ref-chip" onClick={() => { track(events.referenceOpened, { kind: reference.kind }); onOpen(reference); }} title="Open in the workspace">
-    <span className="ref-kind">{referenceKindLabel[reference.kind]}</span><span className="ref-label">{reference.label}</span><span aria-hidden="true">↗</span>
-  </button>;
+  // A reopened conversation that is still generating, without anything sent from this tab: the stream was picked back up.
+  useEffect(() => {
+    if (!resumed || !running || announced.current || sentHere()) return;
+    announced.current = true;
+    setPhase("resumed");
+    track(events.chatStreamResumed, { cause: "reload" });
+  }, [resumed, running, sentHere]);
+
+  useEffect(() => {
+    if (phase !== "resumed" || running) return;
+    const timer = setTimeout(() => setPhase("online"), 3500);
+    return () => clearTimeout(timer);
+  }, [phase, running]);
+
+  const retry = useCallback(() => {
+    setPhase("reconnecting");
+    reconnect().then(() => { setPhase("resumed"); track(events.chatStreamResumed, { cause: "network" }); }, () => setPhase("dropped"));
+  }, [reconnect]);
+
+  useEffect(() => {
+    const offline = () => setPhase("dropped");
+    const online = () => retry();
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
+    return () => { window.removeEventListener("offline", offline); window.removeEventListener("online", online); };
+  }, [retry]);
+
+  if (phase === "online") return null;
+  return <div className="px-4 pt-3"><ConnectionState className="max-w-full" phase={phase} onRetry={retry} /></div>;
 }
 
-const toolLabels: Record<string, string> = {
-  bash: "Ran a shell command", read_file: "Read a file", write_file: "Wrote a file", glob: "Listed files", grep: "Searched files",
-  web_fetch: "Fetched a page", web_search: "Searched the web", load_skill: "Loaded the rules",
-  save_policy_version: "Saved a revision", upload_policy: "Uploaded to Softmax", request_hosted_game: "Requested a hosted game",
-  hosted_game_status: "Checked a hosted game", list_policy_versions: "Reviewed saved revisions", league_standing: "Read the league",
-  coaching_feedback: "Read replay coaching", enter_league: "League entry",
-  load_attachment: "Read an attached file",
-};
-
-function toolLine(part: Extract<EveMessagePart, { type: "dynamic-tool" }>) {
-  const base = toolLabels[part.toolName] ?? part.toolName.replaceAll("_", " ");
-  const input = part.input as Record<string, unknown> | undefined;
-  const detail = part.toolName === "bash" && typeof input?.command === "string" ? input.command
-    : (part.toolName === "write_file" || part.toolName === "read_file") && typeof input?.filePath === "string" ? input.filePath
-    : part.toolName === "save_policy_version" && typeof input?.summary === "string" ? input.summary
-    : part.toolName === "request_hosted_game" && typeof input?.title === "string" ? input.title
-    : "";
-  return { base, detail: detail.length > 90 ? `${detail.slice(0, 87)}…` : detail };
+function SessionError({ canArchive, onArchive }: { canArchive: boolean; onArchive: () => void }) {
+  const error = useEveError();
+  // A failed reply already shows its error in the transcript; this banner is for a session that cannot continue.
+  const shownInThread = useAuiState((s) => s.thread.messages.at(-1)?.status?.type === "incomplete");
+  if (!error) return null;
+  const gone = sessionGone.test(error.message);
+  if (!gone && shownInThread) return null;
+  return (
+    <div role="alert" className="border-border flex flex-col items-start gap-2 border-t px-4 py-3">
+      <p className="text-[13px] leading-relaxed text-red-700">
+        {gone ? "This conversation can no longer be continued. Start a new chat; your saved revisions and results are unaffected." : `${error.message} Try again, or start a new chat if it keeps failing. Your saved revisions and results are unaffected.`}
+      </p>
+      {gone && canArchive ? (
+        <button type="button" onClick={onArchive} className="border-input hover:bg-muted focus-visible:ring-ring rounded-md border px-2.5 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-2">
+          Remove from the list
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
-function ToolPart({ part, onRespond, disabled }: { part: Extract<EveMessagePart, { type: "dynamic-tool" }>; onRespond: (requestId: string, optionId: string) => void; disabled: boolean }) {
-  const { base, detail } = toolLine(part);
-  const display = part.state === "output-error" ? `Failed: ${base.toLowerCase()}` : base;
-  const request = part.toolMetadata?.eve?.inputRequest;
-  const pending = part.state === "approval-requested" && request;
-  const status = part.state === "output-error" ? "failed" : part.state === "output-denied" ? "declined" : part.state === "output-available" ? "done" : part.state === "approval-requested" ? "needs approval" : "running";
-  return <div className={`tool-line ${status.replace(" ", "-")}`} title={detail || base}>
-    <span className="tool-dot" aria-hidden="true" />
-    <span className="tool-text"><b>{display}</b>{detail ? <code>{detail}</code> : null}</span>
-    {part.state === "output-error" ? <em className="tool-error">{part.errorText}</em> : null}
-    {pending ? <span className="tool-approve">
-      <span>{request.prompt}</span>
-      {(request.options ?? [{ id: "approve", label: "Approve" }, { id: "deny", label: "Decline" }]).map((option) => <button key={option.id} type="button" disabled={disabled} className={option.style === "danger" ? "secondary" : ""} onClick={() => onRespond(request.requestId, option.id)}>{option.label}</button>)}
-    </span> : null}
-  </div>;
+/** Product analytics for what the student does in the composer and transcript. */
+function ThreadAnalytics({ noteSent }: { noteSent: () => void }) {
+  useAuiEvent("composer.send", () => { noteSent(); track(events.chatMessageSent, { source: "composer" }); });
+  return null;
 }
 
-function Message({ message, onRespond, onOpenReference, disabled }: { message: EveMessage; onRespond: (requestId: string, optionId: string) => void; onOpenReference: (reference: ChatReference) => void; disabled: boolean }) {
-  const parts = message.parts.filter((part) => part.type === "text" || part.type === "dynamic-tool" || part.type === "authorization");
-  if (!parts.length) return null;
-  if (message.role === "user") {
-    const text = message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-    const reference = parseReference(text);
-    const attachments = [...text.matchAll(attachmentPattern)].flatMap((match): { name: string; type: string; bytes: number }[] => {
-      try { const item = JSON.parse(match[1]); return typeof item.name === "string" && typeof item.type === "string" && typeof item.bytes === "number" ? [item] : []; }
-      catch { return []; }
-    });
-    return <article className="message user"><span className="message-label">You</span>
-      <p>{text.replace(refPattern, "").replace(attachmentPattern, "")}</p>
-      {attachments.map((item, index) => <span key={index} className="message-attachment">{item.type === "policy" ? "BASIC policy" : "Text"} · {item.name} · {Math.ceil(item.bytes / 1024)} KiB</span>)}
-      {reference ? <ReferenceChip reference={reference} onOpen={onOpenReference} /> : null}</article>;
-  }
-  // Group consecutive tool parts so activity reads as one compact list.
-  const grouped: (EveMessagePart | EveMessagePart[])[] = [];
-  for (const part of parts) {
-    const last = grouped.at(-1);
-    if (part.type === "dynamic-tool" && Array.isArray(last)) last.push(part);
-    else if (part.type === "dynamic-tool") grouped.push([part]);
-    else grouped.push(part);
-  }
-  return <article className={`message assistant${message.metadata?.status === "failed" ? " failed" : ""}`}><span className="message-label">Neural Viking Agent</span>
-    {grouped.map((entry, index) => Array.isArray(entry)
-      ? <div key={index} className="tool-list">{entry.map((part) => part.type === "dynamic-tool" ? <ToolPart key={part.toolCallId} part={part} onRespond={onRespond} disabled={disabled} /> : null)}</div>
-      : entry.type === "text" ? (entry.text.replace(nextPattern, "").trim() ? <div key={index} className="message-text"><Markdown>{entry.text.replace(nextPattern, "")}</Markdown></div> : null)
-      : entry.type === "authorization" ? <div key={index} className="tool-line"><span className="tool-dot" /><span className="tool-text"><b>{entry.displayName}</b> {entry.description}</span></div> : null)}
-    {message.metadata?.status === "failed" ? <p className="error">The Neural Viking Agent could not finish this reply. Send the message again.</p> : null}
-  </article>;
-}
-
-export type StarterPrompt = { label: string; text: string; detail: string };
-
-function Thread({ sessionId, initialRequest, onSession, onActivity, onNotice, onOpenReference, onArchive, fallbackSuggestions, starterPrompt, disabled }: {
+function ChatThread({ sessionId, initialRequest, onSession, onActivity, onNotice, onOpenReference, onArchive, fallbackSuggestions, starterPrompt, disabled }: {
   sessionId: string | null; initialRequest: AnalysisRequest | null;
   onSession: (sessionId: string, title: string) => void; onActivity: (kind: "tool" | "turn") => void;
   onNotice: (title: string, detail: string) => void;
   onOpenReference: (reference: ChatReference) => void; onArchive: () => void; fallbackSuggestions: string[];
   starterPrompt: StarterPrompt | null; disabled: boolean;
 }) {
-  const [draft, setDraft] = useState("");
-  const [attachment, setAttachment] = useState<File | null>(null);
-  const [composerError, setComposerError] = useState("");
-  const [sending, setSending] = useState(false);
-  const firstText = useRef<string>(initialRequest?.text ?? "");
-  const started = useRef(false);
+  const runtimeRef = useRef<AssistantRuntime | null>(null);
+  const startedFrom = useRef<string>(initialRequest ? initialRequest.context?.kind ?? "workspace" : "composer");
+  const startedReference = useRef(initialRequest?.reference?.kind);
+  const createdSession = useRef<string | null>(null);
+  const announced = useRef(false);
+  const sent = useRef(false);
   const turnStarted = useRef(0);
   const toolsThisTurn = useRef(0);
-  const viewport = useRef<HTMLDivElement>(null);
-  const agent = useEveAgent({
-    initialSession: sessionId ? { sessionId, streamIndex: 0 } : undefined,
-    resume: sessionId !== null,
-    onSessionChange: (session) => { if (session && !sessionId) onSession(session.sessionId, firstText.current); },
+  const [dictationNotice, setDictationNotice] = useState(false);
+  const adapters = useMemo(() => createChatAdapters(() => setDictationNotice(true)), []);
+
+  // A new conversation gets its list entry once eve has assigned the session and the first message is known.
+  const announce = useCallback((force: boolean) => {
+    if (announced.current || !createdSession.current) return;
+    const first = runtimeRef.current?.thread.getState().messages.find((message) => message.role === "user");
+    const title = first ? studentText(userText(first)) || (userText(first).includes("<attachment>") ? "Attached file" : "") : "";
+    if (!title && !force) return;
+    announced.current = true;
+    track(events.chatStarted, { source: startedFrom.current, reference_kind: startedReference.current });
+    onSession(createdSession.current, title || "New chat");
+  }, [onSession]);
+
+  const runtime = useEveAgentRuntime({
+    ...(sessionId ? { initialSession: { sessionId, streamIndex: 0 }, resume: true } : {}),
+    isDisabled: disabled,
+    adapters,
+    onSessionChange: (session) => {
+      if (!session || sessionId) return;
+      createdSession.current = session.sessionId;
+      announce(false);
+    },
     onEvent: (event) => {
+      if (event.type === "message.received" || event.type === "turn.started") announce(false);
       if (event.type === "action.result") {
         onActivity("tool");
         const data = event.data as { status?: string; result?: { toolName?: string } } | undefined;
@@ -159,6 +216,7 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onNotice, on
       }
       if (event.type === "turn.started") { turnStarted.current = Date.now(); toolsThisTurn.current = 0; }
       if (event.type === "turn.completed") {
+        announce(true);
         onActivity("turn");
         track(events.agentTurnCompleted, { duration_ms: turnStarted.current ? Date.now() - turnStarted.current : undefined, tool_calls: toolsThisTurn.current });
       }
@@ -166,113 +224,58 @@ function Thread({ sessionId, initialRequest, onSession, onActivity, onNotice, on
     },
     onError: (error) => { track(events.agentError, { message: error.message.slice(0, 200) }); onNotice("Chat could not finish", error.message.slice(0, 200)); },
   });
-  const busy = agent.status === "submitted" || agent.status === "streaming";
-  const locked = agent.status === "resuming" || disabled;
+  runtimeRef.current = runtime;
 
-  useEffect(() => {
-    if (!initialRequest || started.current) return;
-    started.current = true;
-    const text = initialRequest.reference ? withReference(initialRequest.text, initialRequest.reference) : initialRequest.text;
-    track(events.chatStarted, { source: initialRequest.context?.kind ?? "workspace", reference_kind: initialRequest.reference?.kind });
-    void agent.send(text, initialRequest.context ? { clientContext: initialRequest.context } : undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialRequest]);
+  const append = useCallback((text: string, context?: Record<string, string>) => {
+    sent.current = true;
+    runtime.thread.append({ role: "user", content: [{ type: "text", text }], ...(context ? { runConfig: { custom: context } } : {}) });
+  }, [runtime]);
 
-  useEffect(() => { viewport.current?.scrollTo({ top: viewport.current.scrollHeight }); }, [agent.data.messages]);
-
-  const submit = useCallback(async () => {
-    const text = draft.trim();
-    if ((!text && !attachment) || locked || sending) return;
-    setSending(true);
-    setComposerError("");
-    try {
-      let message = text;
-      const longPaste = text.length > 4000;
-      if (attachment || longPaste) {
-        const upload = async (name: string, content: string) => {
-          const response = await fetch("/api/attachments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, content }) });
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error ?? "Could not attach the file");
-          return { id: data.id as string, type: data.type as string, name, bytes: data.bytes as number };
-        };
-        const files = [];
-        if (attachment) files.push(await upload(attachment.name, await attachment.text()));
-        if (longPaste) files.push(await upload("pasted-message.txt", text));
-        message = `${longPaste ? "I pasted a long message. Please read the attached text." : text || "Please use my attached file."}\n\n${files.map((file) => `<attachment>${JSON.stringify(file)}</attachment>`).join("\n")}`;
-      }
-      if (!firstText.current) { firstText.current = message; track(events.chatStarted, { source: "composer" }); }
-      await agent.send(message, busy ? { turnPolicy: "steer" } : undefined);
-      setDraft("");
-      setAttachment(null);
-      track(events.chatMessageSent, { length: text.length, steer: busy, source: "composer", attachment: !!attachment || longPaste });
-    } catch (error) {
-      setComposerError(error instanceof Error ? error.message : "Could not send your message");
-    } finally {
-      setSending(false);
-    }
-  }, [agent, attachment, busy, draft, locked, sending]);
-
-  const respond = useCallback((requestId: string, optionId: string) => {
-    track(events.agentApprovalAnswered, { option: optionId });
-    void agent.respond([{ requestId, optionId }]);
-  }, [agent]);
-
-  const sendSuggestion = useCallback((text: string, origin: "coach" | "fallback" | "starter_cta") => {
-    if (locked || busy) return;
-    if (!firstText.current) { firstText.current = text; track(events.chatStarted, { source: origin }); }
+  const sendPrompt = useCallback((text: string, origin: SuggestionOrigin) => {
+    const state = runtime.thread.getState();
+    if (state.isRunning || state.isDisabled) return;
+    if (!state.messages.length) startedFrom.current = origin;
     track(events.suggestionClicked, { text: text.slice(0, 120), origin });
-    track(events.chatMessageSent, { length: text.length, steer: false, source: origin });
-    void agent.send(text);
-  }, [agent, busy, locked]);
+    track(events.chatMessageSent, { length: text.length, source: origin });
+    append(text);
+  }, [append, runtime]);
 
-  const messages = agent.data.messages;
-  const threadReference = useMemo(() => {
-    for (const message of messages) {
-      if (message.role !== "user") continue;
-      const reference = parseReference(message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n"));
-      if (reference) return reference;
-    }
-    return null;
-  }, [messages]);
-  const suggestions = useMemo((): { text: string; origin: "coach" | "fallback" }[] => {
-    if (busy || agent.status === "resuming") return [];
-    const last = [...messages].reverse().find((message) => message.role === "assistant");
-    const fromCoach = last ? parseSuggestions(last.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n")) : [];
-    return fromCoach.length ? fromCoach.map((text) => ({ text, origin: "coach" as const })) : fallbackSuggestions.map((text) => ({ text, origin: "fallback" as const }));
-  }, [agent.status, busy, fallbackSuggestions, messages]);
+  const sendInitial = useCallback((text: string, context?: Record<string, string>) => {
+    track(events.chatMessageSent, { length: text.length, source: startedFrom.current });
+    append(text, context);
+  }, [append]);
 
-  return <div className="thread">
-    {threadReference ? <div className="thread-about"><span>About</span><ReferenceChip reference={threadReference} onOpen={onOpenReference} /></div> : null}
-    <div className="messages" ref={viewport}>
-      {agent.data.messages.length === 0 && agent.status !== "resuming" ? <div className="chat-empty"><span className="chat-empty-icon">✳</span>
-        {starterPrompt ? <>
-          <p><b>Start with a policy.</b> {starterPrompt.detail}</p>
-          <button type="button" className="starter-cta" disabled={locked} onClick={() => sendSuggestion(starterPrompt.text, "starter_cta")}>{starterPrompt.label} ↗</button>
-          <p>Or describe how you want your hero to play and the Neural Viking Agent turns it into a change to <code>hero.bas</code>.</p>
-        </> : <p>Describe how you want your hero to play, ask for a change to <code>hero.bas</code>, or bring back what you noticed in a replay. The Neural Viking Agent edits, uploads, and plays hosted games for you.</p>}</div> : null}
-      {agent.status === "resuming" ? <p className="muted chat-state">Reopening this conversation…</p> : null}
-      {agent.data.messages.map((message) => <Message key={message.id} message={message} onRespond={respond} onOpenReference={onOpenReference} disabled={locked || busy} />)}
-      {busy ? <p className="muted chat-state"><span className="status-dot" /> The Neural Viking Agent is working…</p> : null}
-      {agent.error ? <div className="chat-state error-state">
-        <p className="error">{/no longer active|session_not_active|not found/i.test(agent.error.message) ? "This conversation can no longer be continued. Start a new chat; your saved revisions and results are unaffected." : agent.error.message}</p>
-        {sessionId && /no longer active|session_not_active|not found/i.test(agent.error.message) ? <button type="button" className="secondary" onClick={onArchive}>Remove from the list</button> : null}
-      </div> : null}
-    </div>
-    <div className="composer-wrap">
-      {suggestions.length ? <div className="suggestions" aria-label="Suggested next asks">
-        {suggestions.map(({ text, origin }) => <button key={text} type="button" className="suggestion" disabled={locked} onClick={() => sendSuggestion(text, origin)}>{text}</button>)}
-      </div> : null}
-      <form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      {attachment ? <div className="attachment-chip">{attachment.name} · {Math.ceil(attachment.size / 1024)} KiB <button type="button" aria-label="Remove attachment" onClick={() => setAttachment(null)}>×</button></div> : null}
-      <textarea className="composer-input" placeholder="Describe a strategy, or tell the Neural Viking Agent what to change in hero.bas…" value={draft} disabled={locked}
-        onChange={(event) => setDraft(event.target.value)}
-        onPaste={(event) => track(events.chatPasteAttempted, { length: event.clipboardData.getData("text").length })}
-        onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} />
-      <div className="composer-footer"><span>{busy ? "Sending now steers the current turn" : "Enter to send · Shift+Enter for a new line"}</span>
-        <span className="composer-buttons"><label className="attach-button" title="Attach a .bas or text file">Attach<input type="file" accept=".bas,.txt,.md,text/plain" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setAttachment(file); setComposerError(""); } event.target.value = ""; }} /></label>{busy ? <button type="button" className="text-button" onClick={() => void agent.cancel()}>Stop</button> : null}
-          <button type="submit" className="send-button" disabled={locked || sending || (!draft.trim() && !attachment)}>{sending ? "Attaching…" : "Send"} <span aria-hidden="true">↗</span></button></span></div>
-    </form>{composerError ? <p className="error composer-error" role="alert">{composerError}</p> : null}<p className="attachment-help">Large pastes become text attachments. BASIC files: 64 KiB max; notes: 256 KiB max.</p></div>
-  </div>;
+  const reconnect = useCallback(() => runtime.threads.reloadMainThread(), [runtime]);
+  const sentHere = useCallback(() => sent.current, []);
+  const noteSent = useCallback(() => { sent.current = true; }, []);
+
+  const value = useMemo<ChatThreadValue>(() => ({ resuming: sessionId !== null, starterPrompt, fallbackSuggestions, onOpenReference, sendPrompt }), [fallbackSuggestions, onOpenReference, sendPrompt, sessionId, starterPrompt]);
+  const components = useMemo(() => ({ Welcome }), []);
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime} config={toolConfig}>
+      <TooltipProvider>
+        <ChatThreadProvider value={value}>
+          <div className="aui-scope border-border flex min-h-0 flex-1 flex-col border-t">
+            <InitialRequest request={initialRequest} sendPrompt={sendInitial} />
+            <ThreadAnalytics noteSent={noteSent} />
+            <ThreadAbout />
+            <StreamStatus resumed={sessionId !== null} sentHere={sentHere} reconnect={reconnect} />
+            <div className="flex min-h-0 flex-1 flex-col">
+              <Thread components={components} autoFocus={false} />
+            </div>
+            {dictationNotice ? (
+              <p role="status" className="text-muted-foreground border-border border-t px-4 py-2 text-xs">
+                Dictation could not start in this browser. It works in Chrome, Edge, and Safari with microphone access allowed.{" "}
+                <button type="button" className="text-foreground underline underline-offset-2" onClick={() => setDictationNotice(false)}>Dismiss</button>
+              </p>
+            ) : null}
+            <SessionError canArchive={sessionId !== null} onArchive={onArchive} />
+          </div>
+        </ChatThreadProvider>
+      </TooltipProvider>
+    </AssistantRuntimeProvider>
+  );
 }
 
 export function Chat({ onActivity, onNotice, onSignOut, onOpenReference, analysisRequest, suggestions, starterPrompt, recordingCoaching }: {
@@ -281,51 +284,86 @@ export function Chat({ onActivity, onNotice, onSignOut, onOpenReference, analysi
   analysisRequest: AnalysisRequest | null; suggestions: string[]; starterPrompt: StarterPrompt | null; recordingCoaching: boolean;
 }) {
   const [chats, setChats] = useState<ChatRow[]>([]);
+  // `active` is the highlighted conversation; `thread` is what is mounted. A new chat keeps its mount when eve assigns its session.
   const [active, setActive] = useState<string | null>(null);
-  const [draftKey, setDraftKey] = useState(0);
+  const [thread, setThread] = useState<{ key: string; sessionId: string | null }>({ key: "new-0", sessionId: null });
   const [request, setRequest] = useState<AnalysisRequest | null>(null);
+  const draftCount = useRef(0);
   const seenRequest = useRef(0);
+  const restored = useRef(false);
 
-  const loadChats = useCallback(() => fetch("/api/chats").then((response) => response.json()).then((data) => setChats(data.chats ?? [])).catch(() => undefined), []);
-  useEffect(() => { void loadChats(); }, [loadChats]);
+  const remember = useCallback((sessionId: string | null) => {
+    try {
+      if (sessionId) window.localStorage.setItem(activeChatKey, sessionId);
+      else window.localStorage.removeItem(activeChatKey);
+    } catch { /* storage unavailable: the conversation just is not restored after a reload */ }
+  }, []);
+
+  const startNew = useCallback((next: AnalysisRequest | null) => {
+    draftCount.current += 1;
+    setActive(null);
+    setRequest(next);
+    setThread({ key: `new-${draftCount.current}`, sessionId: null });
+    remember(null);
+  }, [remember]);
+
+  const open = useCallback((sessionId: string) => {
+    setRequest(null);
+    setActive(sessionId);
+    setThread({ key: sessionId, sessionId });
+    remember(sessionId);
+  }, [remember]);
+
+  // Reopen the conversation that was on screen before a reload, so an in-flight reply is picked back up.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/chats").then((response) => response.json()).then((data: { chats?: ChatRow[] }) => {
+      if (cancelled) return;
+      const rows = data.chats ?? [];
+      setChats(rows);
+      if (restored.current) return;
+      restored.current = true;
+      let stored: string | null = null;
+      try { stored = window.localStorage.getItem(activeChatKey); } catch { stored = null; }
+      if (stored && seenRequest.current === 0 && rows.some((chat) => chat.session_id === stored)) open(stored);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [open]);
 
   useEffect(() => {
     if (!analysisRequest || seenRequest.current === analysisRequest.id) return;
     seenRequest.current = analysisRequest.id;
-    setActive(null);
-    setRequest(analysisRequest);
-    setDraftKey((key) => key + 1);
-  }, [analysisRequest]);
+    startNew(analysisRequest);
+  }, [analysisRequest, startNew]);
 
   const onSession = useCallback((sessionId: string, title: string) => {
     const label = title.replace(/\s+/g, " ").trim().slice(0, 80) || "New chat";
     setChats((current) => [{ session_id: sessionId, title: label, updated_at: new Date().toISOString() }, ...current.filter((chat) => chat.session_id !== sessionId)]);
     setActive(sessionId);
+    remember(sessionId);
     void fetch("/api/chats", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, title: label }) });
-  }, []);
+  }, [remember]);
 
   const archive = useCallback((sessionId: string) => {
     setChats((current) => current.filter((chat) => chat.session_id !== sessionId));
-    if (active === sessionId) { setActive(null); setRequest(null); setDraftKey((key) => key + 1); }
+    if (active === sessionId) startNew(null);
     void fetch("/api/chats", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId }) });
-  }, [active]);
-
-  const threadKey = useMemo(() => active ?? `new-${draftKey}`, [active, draftKey]);
+  }, [active, startNew]);
 
   return <aside className="chat-rail">
     <div className="rail-top"><a className="brand" href="/">Softmax IDE <span>Beta</span></a>
       <button className="text-button" disabled={recordingCoaching} onClick={onSignOut}>Sign out</button></div>
     <div className="thread-list">
       <div className="thread-list-header"><span>Conversations</span>
-        <button type="button" className="new-thread" onClick={() => { setActive(null); setRequest(null); setDraftKey((key) => key + 1); }}><span aria-hidden="true">＋</span> New chat</button></div>
+        <button type="button" className="new-thread" onClick={() => startNew(null)}><span aria-hidden="true">＋</span> New chat</button></div>
       <div className="thread-items">
         {chats.map((chat) => <div key={chat.session_id} className="thread-item" data-active={active === chat.session_id ? "" : undefined}>
-          <button type="button" className="thread-trigger" onClick={() => { setRequest(null); setActive(chat.session_id); }}>{chat.title || "New chat"}</button>
+          <button type="button" className="thread-trigger" onClick={() => { if (active !== chat.session_id) open(chat.session_id); }}>{chat.title || "New chat"}</button>
           <button type="button" className="thread-archive" aria-label="Archive chat" onClick={() => archive(chat.session_id)}>×</button>
         </div>)}
         {!chats.length ? <p className="muted thread-empty">Your conversations with the Neural Viking Agent are saved here.</p> : null}
       </div>
     </div>
-    <Thread key={threadKey} sessionId={active} initialRequest={active ? null : request} onSession={onSession} onActivity={onActivity} onNotice={onNotice} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} />
+    <ChatThread key={thread.key} sessionId={thread.sessionId} initialRequest={thread.sessionId ? null : request} onSession={onSession} onActivity={onActivity} onNotice={onNotice} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} />
   </aside>;
 }

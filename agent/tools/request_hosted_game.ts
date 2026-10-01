@@ -4,6 +4,7 @@ import { trackServer } from "../../lib/analytics-server";
 import { events } from "../../lib/analytics-events";
 import { insertExperiment, latestPolicyVersion, listExperiments, markPolicyUploaded, policyVersionByRevision } from "../../lib/db";
 import { requestEpisode, uploadPolicy } from "../../lib/softmax";
+import { resolvePolicyName } from "../lib/policy-name";
 import { requireStudentToken } from "../lib/student";
 import { writeExperiment } from "../lib/workspace";
 
@@ -21,7 +22,9 @@ export default defineTool({
     if (!version) throw new Error("No saved revision to play. Save one with save_policy_version first.");
     let policyVersionId = version.softmax_policy_version_id;
     if (!policyVersionId) {
-      const policy = await uploadPolicy(student.token, student.subjectId, version.source, version.summary);
+      const resolved = await resolvePolicyName(student.subjectId);
+      if (!resolved) throw new Error("This revision is not uploaded and the policy has no name yet. Call upload_policy with policy_name first.");
+      const policy = await uploadPolicy(student.token, student.subjectId, version.source, version.summary, resolved.name);
       policyVersionId = policy.id;
       await markPolicyUploaded(version.id, { policyVersionId, label: `${policy.name}:v${policy.version}` });
     }

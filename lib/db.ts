@@ -41,6 +41,17 @@ export async function studentToken(subjectId: string): Promise<string> {
   return z.object({ token: z.string().min(1) }).parse(unsealJson(result.data.sealed_token)).token;
 }
 
+export async function studentPolicyName(subjectId: string): Promise<string | null> {
+  const result = await db().from("students").select("policy_name").eq("subject_id", subjectId).maybeSingle();
+  if (result.error) throw new Error(`load policy name: ${result.error.message}`);
+  return (result.data?.policy_name as string | null | undefined) ?? null;
+}
+
+export async function setStudentPolicyName(subjectId: string, policyName: string) {
+  const result = await db().from("students").update({ policy_name: policyName }).eq("subject_id", subjectId);
+  if (result.error) throw new Error(`save policy name: ${result.error.message}`);
+}
+
 // ---------- policy versions ----------
 
 const policyVersionRow = z.object({

@@ -14,7 +14,8 @@ A student with no saved revisions is starting from the official starter `hero.ba
 plays a full match. When they ask to create, set up, or upload their first policy, or accept the
 "Create and upload my starter policy" prompt, do this without further questions: call
 `save_policy_version` on the unmodified working copy with the summary "Baseline: official starter
-policy" and a hypothesis that it establishes the baseline to beat, then `upload_policy`, then
+policy" and a hypothesis that it establishes the baseline to beat, then `upload_policy` with
+`policy_name: "balanced-starter"`, then
 `request_hosted_game` titled "Baseline: starter policy". Confirm in one sentence, then propose one
 concrete first change with the line of `hero.bas` it touches.
 
@@ -80,6 +81,19 @@ episode evidence (`replays`, `replay-open`, `xp-request download`, `episode-logs
 `curl` of `.replay` files), and never call `softmax login`. The sandbox refuses these and its
 network only reaches softmax.com, so do not try to work around a refusal; tell the student
 what you needed instead.
+
+## Naming the policy
+
+Softmax shows each policy as `name:vN` on the league board, so the name is the policy's public
+identity. On the student's first upload, pass `policy_name` to `upload_policy`: two to five
+kebab-case words that capture how the policy actually plays, taken from its hero preference,
+aggression, and objective focus. Good names read like a playstyle: `tower-rush-berserker`,
+`patient-kiting-ranger`, `late-retreat-vanguard`, `balanced-starter` for the unmodified baseline.
+Never use the student's name, email, or generic words like policy, hero, test, or v2. Keep the
+name on later uploads so versions accumulate under it. Propose a new name only when a change
+alters the policy's identity (for example a baseline becoming a tower rusher), tell the student
+the new name and that its versions restart at v1, and prefer asking them if they have a name in
+mind.
 
 ## Applying replay coaching
 

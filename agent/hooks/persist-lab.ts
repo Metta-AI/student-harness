@@ -11,9 +11,14 @@ async function persist(ctx: HookContext) {
   const student = studentFromAuth(ctx.session.auth);
   if (!student) return;
   const sandbox = await ctx.getSandbox();
+  // STATUS.md is written last during hydration. A failed turn can end earlier;
+  // never delete persisted lab files or replace a draft from that sandbox.
+  if (await sandbox.readTextFile({ path: "STATUS.md" }) === null) return;
+  const currentRevision = await sandbox.readTextFile({ path: "CURRENT_REVISION.json" });
+  if (currentRevision === null) return;
   const result = await syncLabFiles(sandbox, student.subjectId);
   const source = await sandbox.readTextFile({ path: "hero.bas" });
-  const base = z.object({ revisionId: z.string(), sourceSha256: z.string() }).parse(JSON.parse((await sandbox.readTextFile({ path: "CURRENT_REVISION.json" }))!));
+  const base = z.object({ revisionId: z.string(), sourceSha256: z.string() }).parse(JSON.parse(currentRevision));
   const saved = await latestPolicyVersion(student.subjectId);
   if (source !== null && source !== saved?.source && createHash("sha256").update(source).digest("hex") !== base.sourceSha256) {
     await upsertWorkspaceFiles(student.subjectId, [

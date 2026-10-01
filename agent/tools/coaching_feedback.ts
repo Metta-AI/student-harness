@@ -3,7 +3,7 @@ import { z } from "zod";
 import { trackServer } from "../../lib/analytics-server";
 import { events } from "../../lib/analytics-events";
 import league from "../../league.json";
-import { getCoachingAnalysis, getCoachingSession, getEpisodeStats, getExperience, listCoachingSessions } from "../../lib/softmax";
+import { getCoachingAnalysis, getCoachingSession, getEpisodeStats, getExperience, listCoachingSessions, SoftmaxError } from "../../lib/softmax";
 import { requireStudentToken } from "../lib/student";
 
 export default defineTool({
@@ -26,7 +26,11 @@ export default defineTool({
       return { episode_id: item.id, steps: stats.steps, game_stats: stats.game_stats, participant_scores: item.participant_scores, seats: stats.policy_stats.slice(0, 10) };
     }
     if (!coaching_session_id) {
-      const sessions = await listCoachingSessions(student.token);
+      const sessions = await listCoachingSessions(student.token).catch((error: unknown) => {
+        if (error instanceof SoftmaxError && error.status === 404) return null;
+        throw error;
+      });
+      if (sessions === null) return { available: false, sessions: [], note: "Recording analysis is unavailable for this account. Use completed episode statistics and the student's replay observations." };
       return { sessions: sessions.map((session) => ({ id: session.id, episode_id: session.episode_id, status: session.status, created_at: session.created_at, analysis: session.latest_analysis?.status ?? null, summary: session.feed?.summary ?? null })) };
     }
     const coaching = await getCoachingSession(student.token, coaching_session_id);

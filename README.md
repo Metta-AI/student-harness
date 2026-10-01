@@ -51,9 +51,11 @@ through typed tools.
 
 ## Chat interface
 
-The chat is [assistant-ui](https://www.assistant-ui.com) on top of the eve session, through
-`useEveAgentRuntime` from `@assistant-ui/eve` (`components/chat.tsx`). eve owns the durable stream;
-assistant-ui renders it. The pieces:
+The chat is [assistant-ui](https://www.assistant-ui.com) on top of the eve session
+(`components/chat.tsx`). eve owns the durable stream; assistant-ui renders it. The runtime in
+`components/use-eve-chat-runtime.ts` follows `useEveAgentRuntime` from `@assistant-ui/eve` and
+reuses its message conversion, with one difference: a message sent while a reply is running goes
+to eve immediately as steering instead of waiting for the turn to finish. The pieces:
 
 - `components/assistant-ui/elements/` holds the installed registry components (thread, attachments,
   reasoning and tool groups, approval card, option list, elicitation form, chart, data table,
@@ -68,6 +70,11 @@ assistant-ui renders it. The pieces:
   and dictation use the browser's Web Speech API, so dictation needs Chrome, Edge or Safari.
 - Reloading mid-reply reopens the conversation and follows the in-flight turn. The active session
   id is remembered per browser.
+- Conversations use assistant-ui's thread list in a slide-over sidebar opened from the rail header.
+  It reads the saved conversations from `/api/chats` and supports search, rename, and archive.
+- Reasoning effort (Low, Medium, High) is a per-student preference set in the composer and stored
+  in `students.reasoning_effort`. `agent/agent.ts` resolves it before each model call. There is no
+  Off level: the agent's model rejects a disabled thinking setting.
 
 Styling: Tailwind v4 is loaded without its global reset. `app/globals.css` maps the theme tokens to
 the Ink & Print palette, scopes the reset to `.aui-scope`, and keeps the older `app/styles.css` in

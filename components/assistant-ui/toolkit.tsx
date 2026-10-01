@@ -308,7 +308,9 @@ function AskQuestion({ args, approval, respondToApproval, result, status }: Prop
           aria-label={args.question ?? "Question from the agent"}
           options={options}
           choice={chosen?.length ? chosen : settled ? [] : undefined}
-          onConfirm={open ? (ids) => answer(respondToApproval, { optionId: ids[0]! }, "ask_question", setError) : undefined}
+          // eve's question options carry custom kinds, which must be answered with an explicit approval
+          // alongside the option id. The list shows a rejected answer itself, so no second error line here.
+          onConfirm={open ? (ids) => answer(respondToApproval, { optionId: ids[0]!, approved: true }, "ask_question", () => undefined) : undefined}
         />
       ) : null}
       {typed ? <p className={cn(field, "text-foreground/85 rounded-md px-3 py-2 text-[13px]")}><span className={cn(mono, "text-foreground/65 mr-2")}>Your answer</span>{typed}</p> : null}
@@ -321,7 +323,7 @@ function AskQuestion({ args, approval, respondToApproval, result, status }: Prop
         </form>
       ) : null}
       {status.type === "running" && !approval ? <p className="text-foreground/70 text-xs"><span className="shimmer">Preparing a question</span></p> : null}
-      {error ? <p role="alert" className="text-xs text-red-600">{error}</p> : null}
+      {error && open ? <p role="alert" className="text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }

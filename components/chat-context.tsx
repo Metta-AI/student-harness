@@ -3,6 +3,7 @@
 import { createContext, useContext } from "react";
 import { track } from "../lib/analytics";
 import { events } from "../lib/analytics-events";
+import type { ReasoningEffort } from "../lib/reasoning";
 
 export type ChatReference = {
   kind: "coaching-session" | "replay-note" | "policy-results";
@@ -109,6 +110,9 @@ export type ChatThreadValue = {
   onOpenReference: (reference: ChatReference) => void;
   /** Send a prepared prompt as the student. */
   sendPrompt: (text: string, origin: SuggestionOrigin) => void;
+  /** How much the agent reasons before acting; saved per student and applied from the next model call. */
+  reasoningEffort: ReasoningEffort;
+  onReasoningEffort: (effort: ReasoningEffort) => void;
 };
 
 const ChatThreadContext = createContext<ChatThreadValue | null>(null);

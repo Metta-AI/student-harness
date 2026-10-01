@@ -27,6 +27,10 @@ export const events = {
   chatMessageSpoken: "chat_message_spoken",
   chatMessageCopied: "chat_message_copied",
   chatStreamResumed: "chat_stream_resumed",
+  chatSteered: "chat_steered",
+  chatThreadsOpened: "chat_threads_opened",
+  chatRenamed: "chat_renamed",
+  reasoningEffortChanged: "reasoning_effort_changed",
   // Policy lifecycle (server-side, from the agent's tools)
   policyRevisionSaved: "policy_revision_saved",
   policyUploaded: "policy_uploaded",

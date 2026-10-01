@@ -1,16 +1,21 @@
 "use client";
 
-import { useEveAgentRuntime, useEveError } from "@assistant-ui/eve";
-import { AssistantRuntimeProvider, AuiConfig, Tools, useAui, useAuiEvent, useAuiState, type AssistantRuntime } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, AuiConfig, Tools, useAuiEvent, useAuiState, type AssistantRuntime, type ExternalStoreThreadListAdapter } from "@assistant-ui/react";
+import { PanelLeftIcon, SquarePenIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConnectionState, type ConnectionPhase } from "@/components/assistant-ui/elements/connection-state";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
+import { ThreadList } from "@/components/assistant-ui/elements/thread-list.aui";
+import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { toolkit } from "@/components/assistant-ui/toolkit";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { track } from "../lib/analytics";
 import { events } from "../lib/analytics-events";
+import { defaultReasoningEffort, isReasoningEffort, type ReasoningEffort } from "../lib/reasoning";
 import { createChatAdapters } from "./chat-adapters";
+import { useEveChatRuntime } from "./use-eve-chat-runtime";
 import { ChatThreadProvider, ReferenceChip, parseReference, refPattern, studentText, useChatThread, withReference, type AnalysisRequest, type ChatReference, type ChatThreadValue, type StarterPrompt, type SuggestionOrigin } from "./chat-context";
 
 export { withReference };
@@ -140,8 +145,7 @@ function StreamStatus({ resumed, sentHere, reconnect }: { resumed: boolean; sent
   return <div className="px-4 pt-3"><ConnectionState className="max-w-full" phase={phase} onRetry={retry} /></div>;
 }
 
-function SessionError({ canArchive, onArchive }: { canArchive: boolean; onArchive: () => void }) {
-  const error = useEveError();
+function SessionError({ error, canArchive, onArchive }: { error: Error | undefined; canArchive: boolean; onArchive: () => void }) {
   // A failed reply already shows its error in the transcript; this banner is for a session that cannot continue.
   const shownInThread = useAuiState((s) => s.thread.messages.at(-1)?.status?.type === "incomplete");
   if (!error) return null;
@@ -167,12 +171,69 @@ function ThreadAnalytics({ noteSent }: { noteSent: () => void }) {
   return null;
 }
 
-function ChatThread({ sessionId, initialRequest, onSession, onActivity, onNotice, onOpenReference, onArchive, fallbackSuggestions, starterPrompt, disabled }: {
+/**
+ * The rail header and the conversations sidebar. The sidebar is assistant-ui's thread list in a
+ * slide-over panel: it covers the chat column only while open, so the list costs no height.
+ */
+function RailChrome({ title, onNew, onSignOut, signOutDisabled, children }: { title: string; onNew: () => void; onSignOut: () => void; signOutDisabled: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+
+  const close = useCallback(() => { setOpen(false); trigger.current?.focus(); }, []);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close, open]);
+
+  return (
+    <>
+      <div className="rail-top">
+        <a className="brand" href="/">Softmax IDE <span>Beta</span></a>
+        <button
+          ref={trigger}
+          type="button"
+          aria-expanded={open}
+          aria-controls="chat-conversations"
+          title="Conversations"
+          onClick={() => { setOpen((current) => { if (!current) track(events.chatThreadsOpened, {}); return !current; }); }}
+          className={cn("text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-xs transition-colors outline-none focus-visible:ring-2", open && "bg-accent text-accent-foreground")}
+        >
+          <PanelLeftIcon aria-hidden className="size-4 shrink-0" />
+          <span className="sr-only">Conversations, current: </span>
+          <span className="text-foreground min-w-0 truncate text-start font-medium">{title}</span>
+        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <TooltipIconButton tooltip="New chat" side="bottom" onClick={onNew} className="size-7">
+            <SquarePenIcon />
+          </TooltipIconButton>
+          <button className="text-button" disabled={signOutDisabled} onClick={onSignOut}>Sign out</button>
+        </div>
+      </div>
+      <div className="border-border relative flex min-h-0 flex-1 flex-col">
+        {children}
+        {open ? (
+          <>
+            <button type="button" tabIndex={-1} aria-label="Close conversations" onClick={close} className="bg-foreground/10 animate-in fade-in absolute inset-0 z-10 cursor-default duration-150" />
+            <nav id="chat-conversations" aria-label="Conversations" className="bg-background border-border animate-in slide-in-from-left-2 absolute inset-y-0 start-0 z-20 flex w-[min(320px,88%)] flex-col overflow-y-auto border-e p-2 duration-150">
+              <ThreadList />
+            </nav>
+          </>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function ChatThread({ sessionId, title, threadList, initialRequest, onSession, onActivity, onNotice, onOpenReference, onArchive, onNew, onSignOut, fallbackSuggestions, starterPrompt, disabled, reasoningEffort, onReasoningEffort }: {
+  title: string; threadList: ExternalStoreThreadListAdapter; onNew: () => void; onSignOut: () => void;
   sessionId: string | null; initialRequest: AnalysisRequest | null;
   onSession: (sessionId: string, title: string) => void; onActivity: (kind: "tool" | "turn") => void;
   onNotice: (title: string, detail: string) => void;
   onOpenReference: (reference: ChatReference) => void; onArchive: () => void; fallbackSuggestions: string[];
   starterPrompt: StarterPrompt | null; disabled: boolean;
+  reasoningEffort: ReasoningEffort; onReasoningEffort: (effort: ReasoningEffort) => void;
 }) {
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   const startedFrom = useRef<string>(initialRequest ? initialRequest.context?.kind ?? "workspace" : "composer");
@@ -196,10 +257,12 @@ function ChatThread({ sessionId, initialRequest, onSession, onActivity, onNotice
     onSession(createdSession.current, title || "New chat");
   }, [onSession]);
 
-  const runtime = useEveAgentRuntime({
-    ...(sessionId ? { initialSession: { sessionId, streamIndex: 0 }, resume: true } : {}),
-    isDisabled: disabled,
+  const { runtime, error, status } = useEveChatRuntime({
+    sessionId,
+    disabled,
     adapters,
+    threadList,
+    onSteer: () => track(events.chatSteered, {}),
     onSessionChange: (session) => {
       if (!session || sessionId) return;
       createdSession.current = session.sessionId;
@@ -249,14 +312,14 @@ function ChatThread({ sessionId, initialRequest, onSession, onActivity, onNotice
   const sentHere = useCallback(() => sent.current, []);
   const noteSent = useCallback(() => { sent.current = true; }, []);
 
-  const value = useMemo<ChatThreadValue>(() => ({ resuming: sessionId !== null, starterPrompt, fallbackSuggestions, onOpenReference, sendPrompt }), [fallbackSuggestions, onOpenReference, sendPrompt, sessionId, starterPrompt]);
+  const value = useMemo<ChatThreadValue>(() => ({ resuming: status === "resuming", starterPrompt, fallbackSuggestions, onOpenReference, sendPrompt, reasoningEffort, onReasoningEffort }), [fallbackSuggestions, onOpenReference, onReasoningEffort, reasoningEffort, sendPrompt, starterPrompt, status]);
   const components = useMemo(() => ({ Welcome }), []);
 
   return (
     <AssistantRuntimeProvider runtime={runtime} config={toolConfig}>
       <TooltipProvider>
         <ChatThreadProvider value={value}>
-          <div className="aui-scope border-border flex min-h-0 flex-1 flex-col border-t">
+          <RailChrome title={title} onNew={onNew} onSignOut={onSignOut} signOutDisabled={disabled}>
             <InitialRequest request={initialRequest} sendPrompt={sendInitial} />
             <ThreadAnalytics noteSent={noteSent} />
             <ThreadAbout />
@@ -270,8 +333,8 @@ function ChatThread({ sessionId, initialRequest, onSession, onActivity, onNotice
                 <button type="button" className="text-foreground underline underline-offset-2" onClick={() => setDictationNotice(false)}>Dismiss</button>
               </p>
             ) : null}
-            <SessionError canArchive={sessionId !== null} onArchive={onArchive} />
-          </div>
+            <SessionError error={error} canArchive={sessionId !== null} onArchive={onArchive} />
+          </RailChrome>
         </ChatThreadProvider>
       </TooltipProvider>
     </AssistantRuntimeProvider>
@@ -288,6 +351,7 @@ export function Chat({ onActivity, onNotice, onSignOut, onOpenReference, analysi
   const [active, setActive] = useState<string | null>(null);
   const [thread, setThread] = useState<{ key: string; sessionId: string | null }>({ key: "new-0", sessionId: null });
   const [request, setRequest] = useState<AnalysisRequest | null>(null);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(defaultReasoningEffort);
   const draftCount = useRef(0);
   const seenRequest = useRef(0);
   const restored = useRef(false);
@@ -331,6 +395,24 @@ export function Chat({ onActivity, onNotice, onSignOut, onOpenReference, analysi
   }, [open]);
 
   useEffect(() => {
+    let cancelled = false;
+    fetch("/api/preferences").then((response) => response.json()).then((data: { reasoningEffort?: unknown }) => {
+      if (!cancelled && isReasoningEffort(data.reasoningEffort)) setReasoningEffort(data.reasoningEffort);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  // Optimistic: the control updates at once and falls back if the save fails.
+  const changeReasoningEffort = useCallback((effort: ReasoningEffort) => {
+    setReasoningEffort((previous) => {
+      void fetch("/api/preferences", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reasoningEffort: effort }) })
+        .then((response) => { if (!response.ok) throw new Error("save failed"); })
+        .catch(() => { setReasoningEffort(previous); onNotice("Reasoning setting was not saved", "The agent keeps using the previous setting. Try again."); });
+      return effort;
+    });
+  }, [onNotice]);
+
+  useEffect(() => {
     if (!analysisRequest || seenRequest.current === analysisRequest.id) return;
     seenRequest.current = analysisRequest.id;
     startNew(analysisRequest);
@@ -350,20 +432,36 @@ export function Chat({ onActivity, onNotice, onSignOut, onOpenReference, analysi
     void fetch("/api/chats", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId }) });
   }, [active, startNew]);
 
-  return <aside className="chat-rail">
-    <div className="rail-top"><a className="brand" href="/">Softmax IDE <span>Beta</span></a>
-      <button className="text-button" disabled={recordingCoaching} onClick={onSignOut}>Sign out</button></div>
-    <div className="thread-list">
-      <div className="thread-list-header"><span>Conversations</span>
-        <button type="button" className="new-thread" onClick={() => startNew(null)}><span aria-hidden="true">＋</span> New chat</button></div>
-      <div className="thread-items">
-        {chats.map((chat) => <div key={chat.session_id} className="thread-item" data-active={active === chat.session_id ? "" : undefined}>
-          <button type="button" className="thread-trigger" onClick={() => { if (active !== chat.session_id) open(chat.session_id); }}>{chat.title || "New chat"}</button>
-          <button type="button" className="thread-archive" aria-label="Archive chat" onClick={() => archive(chat.session_id)}>×</button>
-        </div>)}
-        {!chats.length ? <p className="muted thread-empty">Your conversations with the Neural Viking Agent are saved here.</p> : null}
-      </div>
-    </div>
-    <ChatThread key={thread.key} sessionId={thread.sessionId} initialRequest={thread.sessionId ? null : request} onSession={onSession} onActivity={onActivity} onNotice={onNotice} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} />
+  const rename = useCallback((sessionId: string, title: string) => {
+    const label = title.replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!label) return;
+    setChats((current) => current.map((chat) => chat.session_id === sessionId ? { ...chat, title: label } : chat));
+    track(events.chatRenamed, {});
+    void fetch("/api/chats", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, title: label }) });
+  }, []);
+
+  // assistant-ui's thread list reads the saved conversations through this adapter. A new chat keeps
+  // its mount when eve assigns its session, so its row carries the mounted thread's key as its id;
+  // otherwise the runtime would see a different thread and rebuild it mid-reply.
+  const mountedIsNew = thread.sessionId === null;
+  const sessionFor = useCallback((id: string) => (mountedIsNew && id === thread.key ? active : id), [active, mountedIsNew, thread.key]);
+  const threadList = useMemo<ExternalStoreThreadListAdapter>(() => ({
+    threadId: thread.key,
+    threads: chats.map((chat) => ({
+      id: mountedIsNew && chat.session_id === active ? thread.key : chat.session_id,
+      status: "regular" as const,
+      title: chat.title ?? undefined,
+      custom: { updatedAt: chat.updated_at },
+    })),
+    onSwitchToNewThread: () => startNew(null),
+    onSwitchToThread: (id) => { const sessionId = sessionFor(id); if (sessionId && sessionId !== active) open(sessionId); },
+    onRename: (id, title) => { const sessionId = sessionFor(id); if (sessionId) rename(sessionId, title); },
+    onArchive: (id) => { const sessionId = sessionFor(id); if (sessionId) archive(sessionId); },
+  }), [active, archive, chats, mountedIsNew, open, rename, sessionFor, startNew, thread.key]);
+
+  const title = chats.find((chat) => chat.session_id === active)?.title || "New chat";
+
+  return <aside className="chat-rail aui-scope">
+    <ChatThread key={thread.key} sessionId={thread.sessionId} title={title} threadList={threadList} initialRequest={thread.sessionId ? null : request} onSession={onSession} onActivity={onActivity} onNotice={onNotice} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} onNew={() => startNew(null)} onSignOut={onSignOut} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} reasoningEffort={reasoningEffort} onReasoningEffort={changeReasoningEffort} />
   </aside>;
 }

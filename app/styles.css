@@ -431,7 +431,8 @@ a:hover { text-decoration: underline; }
 .split-handle { width: 8px; }
 
 /* Compact density: the IDE is a working surface, so chrome and section padding stay tight. */
-.rail-top { min-height: 38px; padding: 0 14px; }
+.chat-rail { background: #fffdf4; }
+.rail-top { min-height: 38px; padding: 0 12px; background: #fffaf0; }
 .thread-list { padding: 6px 8px 4px; }
 .thread-list-header { margin: 0 6px 4px; }
 .new-thread { padding: 3px 8px; border-radius: 3px; }

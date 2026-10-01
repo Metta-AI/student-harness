@@ -11,7 +11,7 @@
     "test:semantic": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/semantic-ir.test.mjs tests/policy-metrics.test.mjs",
     "eve:dev": "eve dev",
     "eve:info": "eve info",
-    "db:migrate": "psql \"$POSTGRES_URL_NON_POOLING\" -v ON_ERROR_STOP=1 -f supabase/migrations/0001_workspace.sql -f supabase/migrations/0002_workspace_files.sql -f supabase/migrations/0003_experiments_any_run.sql -f supabase/migrations/0004_chat_host.sql -f supabase/migrations/0005_policy_name.sql"
+    "db:migrate": "psql \"$POSTGRES_URL_NON_POOLING\" -v ON_ERROR_STOP=1 -f supabase/migrations/0001_workspace.sql -f supabase/migrations/0002_workspace_files.sql -f supabase/migrations/0003_experiments_any_run.sql -f supabase/migrations/0004_chat_host.sql -f supabase/migrations/0005_policy_name.sql -f supabase/migrations/0006_reasoning_effort.sql"
   },
   "repository": {
     "type": "git",

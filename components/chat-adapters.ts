@@ -27,6 +27,12 @@ class ImageAttachments extends SimpleImageAttachmentAdapter {
     track(events.chatAttachmentAdded, { kind: "image", bytes: state.file.size });
     return super.add(state);
   }
+
+  // Keep the file name with the image so the transcript shows it after a reload.
+  override async send(attachment: PendingAttachment, options?: { signal?: AbortSignal }): Promise<CompleteAttachment> {
+    const complete = await super.send(attachment, options);
+    return { ...complete, content: complete.content.map((part) => (part.type === "image" ? { ...part, filename: attachment.name } : part)) };
+  }
 }
 
 /**

@@ -662,15 +662,18 @@ export function DataTable({
                 <dl className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] leading-4">
                   {columns
                     .filter((column) => column.key !== primaryColumn?.key)
-                    .map((column) => (
+                    .map((column) => {
+                      // Prose values get their own full-width line and wrap; numbers stay as label and value pairs.
+                      const prose = column.align !== "end" && (column.format === undefined || column.format.kind === "text");
+                      return (
                       <div
                         key={column.key}
-                        className="flex min-w-0 items-baseline justify-between gap-2"
+                        className={cn("flex min-w-0 gap-x-2", prose ? "col-span-2 flex-col gap-y-0.5" : "items-baseline justify-between")}
                       >
                         <dt className="text-foreground/70 truncate">
                           {column.label}
                         </dt>
-                        <dd className="text-foreground/75 shrink-0 text-end tabular-nums">
+                        <dd className={cn("text-foreground/85", prose ? "min-w-0 break-words" : "shrink-0 text-end tabular-nums")}>
                           <Value
                             column={column}
                             row={row}
@@ -682,7 +685,8 @@ export function DataTable({
                           />
                         </dd>
                       </div>
-                    ))}
+                      );
+                    })}
                 </dl>
               ) : null}
             </div>

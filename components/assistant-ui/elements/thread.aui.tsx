@@ -28,6 +28,7 @@ import { ReferenceChip, longPasteLength, parseAttachments, parseReference, parse
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { track } from "@/lib/analytics";
 import { events } from "@/lib/analytics-events";
+import { reasoningEfforts, reasoningLabels, isReasoningEffort } from "@/lib/reasoning";
 import { cn } from "@/lib/utils";
 import {
   ActionBarMorePrimitive,
@@ -239,6 +240,9 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
             <ThreadScrollToBottom />
             <NextSuggestions />
             <Composer autoFocus={autoFocus} />
+            <AuiIf condition={(s) => s.thread.isRunning && !s.composer.isEmpty}>
+              <p className="text-muted-foreground -mt-1 px-1 text-[11px]">Sending now steers the current reply instead of waiting for it to finish.</p>
+            </AuiIf>
           </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
@@ -451,6 +455,31 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   );
 };
 
+/** Reasoning effort for the agent's next model calls. A native select keeps it keyboard and screen-reader friendly. */
+const ReasoningSelect: FC = () => {
+  const { reasoningEffort, onReasoningEffort } = useChatThread();
+  return (
+    <label
+      title={reasoningLabels[reasoningEffort].detail}
+      className="text-muted-foreground hover:text-foreground focus-within:ring-ring flex h-7 items-center gap-1 rounded-md ps-1.5 text-xs transition-colors focus-within:ring-2"
+    >
+      <span>Reasoning</span>
+      <select
+        value={reasoningEffort}
+        onChange={(event) => { if (isReasoningEffort(event.target.value)) onReasoningEffort(event.target.value); }}
+        aria-label="Reasoning effort"
+        className="text-foreground h-7 cursor-pointer rounded-md bg-transparent pe-1 text-xs font-medium outline-none"
+      >
+        {reasoningEfforts.map((effort) => (
+          <option key={effort} value={effort}>
+            {reasoningLabels[effort].label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+};
+
 const ComposerAction: FC = () => {
   // The stop control only cancels the send while no run it could stop is going.
   const isSending = useAuiState(
@@ -458,10 +487,14 @@ const ComposerAction: FC = () => {
       s.composer.submission !== undefined &&
       !(s.thread.isRunning && s.thread.capabilities.cancel),
   );
+  const running = useAuiState((s) => s.thread.isRunning);
 
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
-      <ComposerAddAttachment />
+      <div className="flex min-w-0 items-center gap-1.5">
+        <ComposerAddAttachment />
+        <ReasoningSelect />
+      </div>
       <div className="flex items-center gap-1.5">
         <AuiIf condition={(s) => s.thread.capabilities.dictation}>
           <AuiIf condition={(s) => s.composer.dictation == null}>
@@ -495,38 +528,27 @@ const ComposerAction: FC = () => {
             </ComposerPrimitive.StopDictation>
           </AuiIf>
         </AuiIf>
-        <AuiIf
-          condition={(s) =>
-            !s.composer.canCancel ||
-            (s.thread.voice !== undefined &&
-              s.composer.submission === undefined)
-          }
-        >
+        {/* While a reply is running, sending steers it; the stop control stays next to it. */}
+        <AuiIf condition={(s) => !s.composer.canCancel || !s.composer.isEmpty}>
           <ComposerPrimitive.Send asChild>
             <TooltipIconButton
-              tooltip="Send message"
+              tooltip={running ? "Steer the current reply" : "Send message"}
               side="bottom"
               type="button"
               variant="default"
               size="icon"
               className="aui-composer-send size-7 rounded-full"
-              aria-label="Send message"
+              aria-label={running ? "Steer the current reply" : "Send message"}
             >
               <ArrowUpIcon className="aui-composer-send-icon size-4" />
             </TooltipIconButton>
           </ComposerPrimitive.Send>
         </AuiIf>
-        <AuiIf
-          condition={(s) =>
-            s.composer.canCancel &&
-            (s.thread.voice === undefined ||
-              s.composer.submission !== undefined)
-          }
-        >
+        <AuiIf condition={(s) => s.composer.canCancel}>
           <ComposerPrimitive.Cancel asChild>
             <Button
               type="button"
-              variant="default"
+              variant={running ? "outline" : "default"}
               size="icon"
               className="aui-composer-cancel size-7 rounded-full"
               aria-label={isSending ? "Cancel sending" : "Stop generating"}
@@ -603,7 +625,7 @@ const AssistantMessage: FC = () => {
                 }
                 const running = part.status.type === "running";
                 return (
-                  <ReasoningRoot streaming={running}>
+                  <ReasoningRoot variant="ghost" streaming={running}>
                     <ReasoningTrigger active={running} />
                     <ReasoningContent aria-busy={running}>
                       <ReasoningText>{children}</ReasoningText>
@@ -754,11 +776,9 @@ const NextSuggestions: FC = () => {
   );
 };
 
-const UserFilePart: FileMessagePartComponent = (part) => (
-  <div data-slot="aui_user-message-file" className="py-1">
-    <File {...part} />
-  </div>
-);
+// The eve adapter lists every file a student sent as an attachment tile above the bubble,
+// so the same file is not repeated as a card inside it.
+const UserFilePart: FileMessagePartComponent = () => null;
 
 const UserImagePart: ImageMessagePartComponent = (part) => (
   <div data-slot="aui_user-message-image" className="py-1">

@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { sealJson, unsealJson } from "./crypto";
+import { defaultReasoningEffort, isReasoningEffort, type ReasoningEffort } from "./reasoning";
 import type { PolicyRevision } from "./semantic-ir";
 
 let client: SupabaseClient | undefined;
@@ -50,6 +51,18 @@ export async function studentPolicyName(subjectId: string): Promise<string | nul
 export async function setStudentPolicyName(subjectId: string, policyName: string) {
   const result = await db().from("students").update({ policy_name: policyName }).eq("subject_id", subjectId);
   if (result.error) throw new Error(`save policy name: ${result.error.message}`);
+}
+
+export async function studentReasoningEffort(subjectId: string): Promise<ReasoningEffort> {
+  const result = await db().from("students").select("reasoning_effort").eq("subject_id", subjectId).maybeSingle();
+  if (result.error) throw new Error(`load reasoning effort: ${result.error.message}`);
+  const value = result.data?.reasoning_effort;
+  return isReasoningEffort(value) ? value : defaultReasoningEffort;
+}
+
+export async function setStudentReasoningEffort(subjectId: string, effort: ReasoningEffort) {
+  const result = await db().from("students").update({ reasoning_effort: effort }).eq("subject_id", subjectId);
+  if (result.error) throw new Error(`save reasoning effort: ${result.error.message}`);
 }
 
 // ---------- policy versions ----------

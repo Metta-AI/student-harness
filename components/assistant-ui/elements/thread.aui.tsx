@@ -681,18 +681,13 @@ const AssistantMessage: FC = () => {
   );
 };
 
-const messageText = (s: AssistantState) =>
-  s.message.parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n\n");
-
 const AssistantActionBar: FC = () => {
-  const aui = useAui();
   const { isCopied, copyToClipboard } = useCopyToClipboard();
-  const hasText = useAuiState((s) => stripAgentBlocks(messageText(s)).trim().length > 0);
+  const replyText = useAuiState((s) => stripAgentBlocks(
+    s.message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n\n"),
+  ).trim());
 
-  if (!hasText) return null;
+  if (!replyText) return null;
 
   return (
     <ActionBarPrimitive.Root
@@ -703,7 +698,7 @@ const AssistantActionBar: FC = () => {
       <TooltipIconButton
         tooltip={isCopied ? "Copied" : "Copy reply"}
         onClick={() => {
-          copyToClipboard(stripAgentBlocks(messageText(aui.message().getState() as never)).trim());
+          copyToClipboard(replyText);
           track(events.chatMessageCopied, {});
         }}
       >

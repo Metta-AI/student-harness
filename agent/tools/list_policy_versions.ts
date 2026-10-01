@@ -1,12 +1,13 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { listExperiments, listPolicyVersions } from "../../lib/db";
+import { leagueRecord } from "../../lib/league-record";
 import { bestLeagueRevision, leagueState } from "../../lib/league-results";
 import { getCompetitionDivision, getPolicyLeaderboard, listLeagueSubmissions } from "../../lib/softmax";
 import { requireStudentToken } from "../lib/student";
 
 export default defineTool({
-  description: "Compare all saved revisions with separate hosted self-play and live NeuralHub league evidence. Includes actual submission status even when a submitted revision has no leaderboard games. Rank league revisions by league score, never by hosted score or win rate alone.",
+  description: "Compare all saved revisions with separate hosted self-play and live NeuralHub league evidence. Includes actual submission status even when a submitted revision has no leaderboard games. Rank league revisions by league score, never by hosted score or win rate alone. League wins are destroyed forts; time-limit games score 0 and are reported separately, never as wins.",
   inputSchema: z.object({}),
   label: { start: () => "List saved revisions" },
   async execute(_input, ctx) {
@@ -14,6 +15,9 @@ export default defineTool({
     const [versions, experiments] = await Promise.all([listPolicyVersions(student.subjectId), listExperiments(student.subjectId)]);
     const [division, submissions] = await Promise.all([getCompetitionDivision(student.token), listLeagueSubmissions(student.token)]);
     const board = (await getPolicyLeaderboard(student.token, division.id)) ?? [];
+    // Wins come from each revision's own league episodes: the leaderboard counts time-limit ties as wins.
+    const played = board.filter((row) => row.episodes_played > 0 && versions.some((version) => version.softmax_policy_version_id === row.policy_version_id));
+    const records = new Map(await Promise.all(played.map(async (row) => [row.policy_version_id, await leagueRecord(student.token, row.policy_version_id).catch(() => null)] as const)));
     const revisions = versions.map((version) => {
         const games = experiments.filter((experiment) => experiment.policy_version_id === version.id);
         const scores = games.flatMap((game) => game.episodes.flatMap((episode) => episode.our_scores));
@@ -32,7 +36,10 @@ export default defineTool({
           hosted_death_samples: deaths.length,
           league_state: leagueState(version.softmax_policy_version_id, !!submission, standing?.episodes_played ?? 0),
           league_submission: submission ? { id: submission.id, status: submission.status, created_at: submission.created_at } : null,
-          league_result_72h: standing ? { rank: standing.rank, score: standing.score, wins: standing.wins, games: standing.episodes_played, win_rate: standing.win_rate } : null,
+          league_result_72h: standing ? (() => {
+            const record = records.get(standing.policy_version_id);
+            return { rank: standing.rank, score: standing.score, games: record?.games ?? standing.episodes_played, ...(record ? { wins: record.wins, losses: record.losses, time_limits: record.time_limits } : {}) };
+          })() : null,
         };
       });
     return {

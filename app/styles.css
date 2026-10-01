@@ -163,7 +163,6 @@ a:hover { text-decoration: underline; }
 .episode-table td:first-child strong { display: inline-block; width: 35px; color: #945637; font: 11px "Marfa Mono", monospace; }
 .episode-table td:first-child span { display: inline-block; max-width: calc(100% - 40px); overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .episode-table .score-cell { color: #0e2758; font: 12px "Marfa Mono", monospace; }
-.episode-table .win-cell { color: #0e2758; font: 12px "Marfa Mono", monospace; }
 .episode-table .policy-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; font: 11px "Marfa Mono", monospace; }
 .episode-status { color: var(--muted-ink); text-transform: capitalize; }
 .episode-status.completed { color: #1a3875; }

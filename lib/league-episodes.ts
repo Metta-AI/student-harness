@@ -80,3 +80,15 @@ export function summarizeLeagueEpisode(
     opponents,
   };
 }
+
+export type LeagueTally = { games: number; wins: number; losses: number; time_limits: number };
+
+/**
+ * Count league results. A win is a destroyed enemy fort. A match that reaches the time limit scores 0
+ * for both sides and is not a win, whatever a leaderboard that counts ties for first may report.
+ */
+export function tallyLeagueOutcomes(outcomes: (LeagueOutcome | null)[]): LeagueTally {
+  const count = (wanted: LeagueOutcome) => outcomes.filter((outcome) => outcome === wanted).length;
+  const tally = { wins: count("won"), losses: count("lost"), time_limits: count("time_limit") };
+  return { games: tally.wins + tally.losses + tally.time_limits, ...tally };
+}

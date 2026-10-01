@@ -203,8 +203,8 @@ export async function listExperiences(token: string) {
 }
 
 /** One page of the episodes a policy version was scheduled into, newest first. Round episodes carry a round ID. */
-export async function listPolicyVersionEpisodeRequests(token: string, policyVersionId: string, cursor?: string | null) {
-  const params = new URLSearchParams({ limit: "50" });
+export async function listPolicyVersionEpisodeRequests(token: string, policyVersionId: string, cursor?: string | null, limit = 50) {
+  const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
   return softmax(`/v2/policy-versions/${policyVersionId}/episode-requests?${params}`, token, episodeRequestPageSchema);
 }

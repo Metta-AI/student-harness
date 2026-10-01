@@ -46,7 +46,9 @@ type ArenaData = {
 };
 type LeaguePolicy = {
   rank: number; policy_version_id: string; policy_label: string; score: number;
-  wins: number; episodes_played: number; win_rate: number; rounds_played: number;
+  // The leaderboard also reports wins and a win rate, but it counts a tie for first as a win, which
+  // turns every time-limit game into a win. Wins are counted from the episodes instead (LeagueRecord).
+  episodes_played: number; rounds_played: number;
 };
 type PolicyStats = { division: string; windowHours: number; policies: LeaguePolicy[]; entered: string[] };
 /** One league-round episode from the selected policy version's point of view. */
@@ -54,6 +56,7 @@ type LeagueEpisode = LeagueEpisodeSummary & {
   id: string; status: string; created_at: string; replay_url: string | null; error: string | null;
   round: { id: string; number: number };
 };
+type LeagueRecord = { policyVersionId: string; games: number; wins: number; losses: number; time_limits: number; window_hours: number; complete: boolean };
 type LeagueFeed = { policyVersionId: string; episodes: LeagueEpisode[]; nextCursor: string | null };
 const leagueStatusLabel: Record<string, string> = { pending: "Queued", submitted: "Queued", running: "Running", failed: "Failed", cancelled: "Cancelled", canceled: "Cancelled" };
 const leagueOutcomeLabel = { won: "Won", lost: "Lost", time_limit: "Time limit" } as const;
@@ -70,11 +73,10 @@ function leagueRoster(episode: LeagueEpisode) {
 }
 type MatchStats = { steps: number | null; game_stats: Record<string, number>; policy_stats: { position: number; policy_name: string | null; avg_reward: number; avg_metrics: Record<string, number> }[] };
 type ReplaySnapshot = { id: string; games: number; windowStart: string; windowEnd: string; record: { wins: number; losses: number; draws: number }; values: Record<string, number> };
-type SortKey = "episode" | "policy" | "played" | "score" | "winRate";
+type SortKey = "episode" | "policy" | "played" | "score";
 const tableColumns: { key: SortKey; label: string }[] = [
   { key: "episode", label: "Episode" }, { key: "policy", label: "Policy" },
   { key: "played", label: "Played" }, { key: "score", label: "Score" },
-  { key: "winRate", label: "Policy win %" },
 ];
 function episodePolicyId(episode: ArenaEpisode) {
   return episode.scores.length === 1 ? episode.scores[0].policy_version_id : null;
@@ -114,6 +116,7 @@ export function StudentApp({ league }: { league: League }) {
   // League rounds and hosted practice games are different things, listed separately. null follows the data.
   const [matchView, setMatchView] = useState<"league" | "practice" | null>(null);
   const [leagueFeed, setLeagueFeed] = useState<LeagueFeed | null>(null);
+  const [leagueRecord, setLeagueRecord] = useState<LeagueRecord | null>(null);
   const [leagueLoading, setLeagueLoading] = useState(false);
   const [leagueError, setLeagueError] = useState("");
   const [leagueSelection, setLeagueSelection] = useState<{ id: string; policyVersionId: string; label: string } | null>(null);
@@ -348,11 +351,17 @@ export function StudentApp({ league }: { league: League }) {
   const activePlayer = activeVersion?.player ?? defaultPlayer;
   const leaguePolicyId = activeVersion?.policyVersionId ?? "";
   useEffect(() => {
-    if (!email || !leaguePolicyId) { setLeagueFeed(null); return; }
+    if (!email || !leaguePolicyId) { setLeagueFeed(null); setLeagueRecord(null); return; }
     let cancelled = false;
     setLeagueFeed((feed) => (feed?.policyVersionId === leaguePolicyId ? feed : null));
+    setLeagueRecord((record) => (record?.policyVersionId === leaguePolicyId ? record : null));
     setLeagueError("");
-    const refresh = () => fetch(`/api/league-episodes?policyVersionId=${leaguePolicyId}`).then(async (response) => {
+    const refreshRecord = () => fetch(`/api/league-record?policyVersionId=${leaguePolicyId}`).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not load the league record");
+      if (!cancelled) setLeagueRecord(data);
+    }).catch((cause: Error) => { if (!cancelled) setLeagueError(cause.message); });
+    const refreshEpisodes = () => fetch(`/api/league-episodes?policyVersionId=${leaguePolicyId}`).then(async (response) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not load league episodes");
       if (cancelled) return;
@@ -366,6 +375,7 @@ export function StudentApp({ league }: { league: League }) {
         return { policyVersionId: leaguePolicyId, episodes: [...newest, ...older], nextCursor: older.length ? feed.nextCursor : data.nextCursor };
       });
     }).catch((cause: Error) => { if (!cancelled) setLeagueError(cause.message); });
+    const refresh = () => { void refreshEpisodes(); void refreshRecord(); };
     refresh();
     const timer = window.setInterval(refresh, 60000);
     return () => { cancelled = true; window.clearInterval(timer); };
@@ -387,6 +397,7 @@ export function StudentApp({ league }: { league: League }) {
     }).catch((cause: Error) => setLeagueError(cause.message)).finally(() => setLeagueLoading(false));
   }
   const leagueRows = leagueFeed?.policyVersionId === leaguePolicyId ? leagueFeed.episodes : [];
+  const activeRecord = leagueRecord?.policyVersionId === leaguePolicyId ? leagueRecord : null;
   const leagueReady = !!leagueFeed && leagueFeed.policyVersionId === leaguePolicyId;
   const leagueDecided = leagueRows.filter((episode) => episode.outcome);
   const leagueTally = { won: leagueDecided.filter((episode) => episode.outcome === "won").length, lost: leagueDecided.filter((episode) => episode.outcome === "lost").length, time_limit: leagueDecided.filter((episode) => episode.outcome === "time_limit").length };
@@ -428,7 +439,6 @@ export function StudentApp({ league }: { league: League }) {
       if (sort.key === "policy") return selectedPolicyId ? boardByPolicy.get(selectedPolicyId)?.policy_label ?? selectedPolicyId : policyId ? boardByPolicy.get(policyId)?.policy_label ?? policyId : "Mixed";
       if (sort.key === "played") return new Date(episode.completed_at ?? episode.created_at).getTime();
       if (sort.key === "score") return selectedPolicyId ? policyScore(episode, selectedPolicyId) : episodeScore(episode);
-      if (sort.key === "winRate") return boardByPolicy.get(selectedPolicyId || policyId || "")?.win_rate ?? null;
       return null;
     };
     const left = value(a);
@@ -531,6 +541,7 @@ export function StudentApp({ league }: { league: League }) {
     setSelectedPolicyId("");
     setSelectedEpisodeId("");
     setLeagueFeed(null);
+    setLeagueRecord(null);
     setLeagueSelection(null);
     setMatchView(null);
     setViewer(null);
@@ -697,14 +708,14 @@ export function StudentApp({ league }: { league: League }) {
                   {[...new Set([...uploadedVersions.map((version) => version.policyVersionId), ...policyIds])].map((id) => <option key={id} value={id}>{policyLabel(id)}{entered.has(id) ? " · in league" : ""}</option>)}
                 </select></div>
               <div className="performance-values">
-                <div><strong>{activeStanding ? `${(activeStanding.win_rate * 100).toFixed(1)}%` : "—"}</strong><span>League win % · {activeStanding ? `${activeStanding.wins}/${activeStanding.episodes_played} games` : "No league games in window"}</span></div>
-                <div><strong>{activeStanding ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(activeStanding.score) : "—"}</strong><span>League score · 72h</span></div>
+                <div><strong>{activeRecord?.games ? `${((activeRecord.wins / activeRecord.games) * 100).toFixed(1)}%` : leaguePolicyId && !activeRecord ? "…" : "—"}</strong><span>League win % · {activeRecord?.games ? `${activeRecord.wins} won, ${activeRecord.losses} lost, ${activeRecord.time_limits} time limit in ${activeRecord.complete ? "" : "the newest "}${activeRecord.games} games · 72h` : activeRecord || !leaguePolicyId ? "No finished league games in the last 72 hours" : "Counting league games"}</span></div>
+                <div><strong>{activeStanding ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(activeStanding.score) : "—"}</strong><span>League score · {activeStanding ? `mean per game · rank ${activeStanding.rank} of ${policyStats?.policies.length ?? "?"} · 72h` : "not on the 72h leaderboard"}</span></div>
                 <div><strong>{hostedMean === null ? "—" : new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(hostedMean)}</strong><span>Practice mean score · {activeScores.length} hosted games</span></div>
               </div>
               {replaySnapshot ? <div className="snapshot-metrics"><div><strong>Replay behavior · {replaySnapshot.games} hero-games</strong><span>{new Date(replaySnapshot.windowStart).toLocaleDateString()} – {new Date(replaySnapshot.windowEnd).toLocaleDateString()} · dated snapshot</span></div>
                 {["kills", "deaths", "tower_kills", "xp", "rejected_share"].map((name) => <div key={name}><b>{replaySnapshot.values[name] === undefined ? "—" : name === "rejected_share" ? `${(replaySnapshot.values[name] * 100).toFixed(1)}%` : new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(replaySnapshot.values[name])}</b><span>{name.replaceAll("_", " ")}</span></div>)}
               </div> : null}
-              <div className="performance-bottom"><span>League win % uses competition games from the last 72 hours. Ties for first count as wins. Practice games are scored separately.</span>
+              <div className="performance-bottom"><span>A win is a destroyed enemy fort. A game that reaches the time limit scores 0 for both sides and is not a win. Practice games are scored separately.</span>
                 <button className="secondary" disabled={!latestActiveEpisode} onClick={discussPolicyResults}>Discuss results ↗</button></div>
               {policyStatsError ? <p className="error">{policyStatsError}</p> : null}
               {snapshotError ? <p className="error">{snapshotError}</p> : null}
@@ -755,7 +766,7 @@ export function StudentApp({ league }: { league: League }) {
                   {leagueEntry && leagueEntry.id !== activeVersion.id ? <button type="button" className="starter-cta" onClick={() => { setSelectedPolicyId(leagueEntry.policyVersionId); setMatchView("league"); }}>Show league episodes for r{leagueEntry.revision}</button>
                     : !entered.has(activeVersion.policyVersionId) ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: `Enter revision r${activeVersion.revision} in the NeuralHub league.` })}>Enter r{activeVersion.revision} in the league ↗</button> : null}</div>
                 : <>
-                  <p className="league-tally">{leagueDecided.length ? <>Of the {leagueDecided.length} {leagueFeed?.nextCursor ? "newest " : ""}finished episodes: <b>{leagueTally.won} won</b>, <b>{leagueTally.lost} lost</b>, <b>{leagueTally.time_limit} hit the time limit</b> with no fort destroyed, which scores 0 for both sides.</> : "No league episode has finished yet."}</p>
+                  <p className="league-tally">{leagueDecided.length ? <>Of the {leagueDecided.length} {leagueFeed?.nextCursor ? "newest " : ""}finished episodes: <b>{leagueTally.won} won</b>, <b>{leagueTally.lost} lost</b>, <b>{leagueTally.time_limit} hit the time limit</b> with no fort destroyed. That scores 0 for both sides and is not a win.</> : "No league episode has finished yet."}</p>
                   <div className="episode-table-wrap"><table className="episode-table league-table"><thead><tr><th>Round</th><th>Played</th><th>Side</th><th>Against</th><th>Result</th><th title="Mean score across the heroes this policy controlled">Score / hero</th></tr></thead><tbody>
                     {leagueRows.map((episode) => {
                       const playable = episode.status === "completed" && !!episode.replay_url && !recordingCoaching;
@@ -784,7 +795,6 @@ export function StudentApp({ league }: { league: League }) {
                     <td className="policy-cell" title={standing?.policy_label ?? policyId ?? "Multiple policies"}>{standing?.policy_label ?? (policyId ? `Policy ${policyId.slice(0, 8)}` : "Mixed")}</td>
                     <td>{new Date(episode.completed_at ?? episode.created_at).toLocaleString()}</td>
                     <td className="score-cell" title={selectedPolicyId ? "Recorded score for the selected policy" : "Average per policy when a match has multiple policies"}>{score === null ? "—" : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(score)}</td>
-                    <td className="win-cell" title="This exact policy version’s win rate in league games over the last 72 hours; not this hosted match’s outcome">{standing ? `${(standing.win_rate * 100).toFixed(1)}%` : "—"}</td>
                   </tr>;
                 })}</tbody></table>{!sortedEpisodes.length ? <div className="empty-games">No practice games for this policy version yet.</div> : null}</div>}
             </>}

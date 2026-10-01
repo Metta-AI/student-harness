@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { summarizeLeagueEpisode } from "../lib/league-episodes.ts";
+import { summarizeLeagueEpisode, tallyLeagueOutcomes } from "../lib/league-episodes.ts";
 
 const seats = (first, second) => [...Array(10).keys()].map((position) => {
   const team = position < 5 ? first : second;
@@ -50,4 +50,10 @@ test("an episode that has not finished has no score or outcome", () => {
   assert.equal(summary.score, null);
   assert.equal(summary.outcome, null);
   assert.equal(summary.side, "Red");
+});
+
+test("time-limit games are counted on their own and never as wins", () => {
+  const tally = tallyLeagueOutcomes(["won", "time_limit", "time_limit", "lost", "time_limit", null]);
+  assert.deepEqual(tally, { games: 5, wins: 1, losses: 1, time_limits: 3 });
+  assert.equal(tally.wins / tally.games, 0.2);
 });

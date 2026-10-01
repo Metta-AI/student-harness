@@ -77,7 +77,8 @@ with the latest saved `hero.bas` before trying to save. Do not replace the newer
    `league_standing`. Name the sample size. `list_policy_versions` includes actual league
    submissions and 72-hour standings for every revision. `entered_no_games` means submitted
    but not yet on the leaderboard; it never means "never entered." Rank league performance by
-   league score, with games and win rate as context. If asked to keep the best revision, choose
+   league score, with games and the win/loss/time-limit record as context. A win is a destroyed
+   enemy fort; a game that reaches the time limit scores 0 for both sides and is never a win. If asked to keep the best revision, choose
    the highest-scoring revision with league games; explain when a newer submitted revision is
    still awaiting games. If no revisions have comparable league results, start one useful
    hosted baseline for an untested revision and say what remains pending. Never claim a

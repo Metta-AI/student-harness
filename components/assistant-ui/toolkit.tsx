@@ -154,7 +154,7 @@ type Revisions = {
     revision: number; summary?: string; uploaded_as?: string | null;
     hosted_mean_score?: number | null; hosted_scored_seats?: number; hosted_completed_games?: number;
     league_state?: LeagueState;
-    league_result_72h?: { rank: number; score: number; wins: number; games: number } | null;
+    league_result_72h?: { rank: number; score: number; games: number; wins?: number; losses?: number; time_limits?: number } | null;
   }[];
   best_league_revision_72h?: number | null;
   note?: string;
@@ -182,7 +182,7 @@ function Revisions({ result, status, isError }: Props<Record<string, never>, Rev
     summary: `${item.summary ?? ""}${item.uploaded_as ? ` (uploaded as ${item.uploaded_as})` : " (not uploaded)"}`,
     mean: item.hosted_mean_score ?? null,
     seats: item.hosted_scored_seats ?? 0,
-    ...(withLeague ? { league: item.league_result_72h && item.league_result_72h.games > 0 ? `Score ${score(item.league_result_72h.score)}, rank ${item.league_result_72h.rank}, ${item.league_result_72h.games} games` : item.league_state ? leagueStateLabel[item.league_state] : "" } : {}),
+    ...(withLeague ? { league: item.league_result_72h && item.league_result_72h.games > 0 ? `Score ${score(item.league_result_72h.score)}, rank ${item.league_result_72h.rank}, ${item.league_result_72h.time_limits === undefined ? "" : `${item.league_result_72h.wins ?? 0} won of `}${item.league_result_72h.games} games` : item.league_state ? leagueStateLabel[item.league_state] : "" } : {}),
   }));
   return (
     <figure className="my-2">
@@ -195,17 +195,18 @@ function Revisions({ result, status, isError }: Props<Record<string, never>, Rev
 
 type Standing = {
   league?: { name?: string; rounds_paused?: boolean }; window_hours?: number; entries?: number; note?: string;
-  my_standing?: { rank: number; wins: number; games: number; win_rate: number; score: number } | null;
+  // `time_limits` marks a record counted from episodes. Older results carried the leaderboard's own
+  // wins, which count time-limit ties as wins, so those are never shown.
+  my_standing?: { rank: number; score: number; games: number; wins?: number; losses?: number; time_limits?: number } | null;
   my_revision?: { revision: number; uploaded_as: string | null; player?: string | null } | null;
   league_state?: LeagueState;
   submission?: { status?: string } | null;
-  top?: { rank: number; policy: string; player: string; win_rate: number; games: number; score: number }[];
+  top?: { rank: number; policy: string; player: string; games: number; score: number }[];
 };
 const standingColumns: readonly DataTableColumn[] = [
   { key: "rank", label: "#", priority: "primary", format: { kind: "number" }, width: "2.25rem" },
   { key: "policy", label: "Policy", priority: "primary" },
   { key: "player", label: "Player" },
-  { key: "win_rate", label: "Win rate", format: { kind: "percent", decimals: 0 }, align: "end" },
   { key: "games", label: "Games", format: { kind: "number" }, align: "end" },
   { key: "score", label: "Score", format: { kind: "number", decimals: 2 }, align: "end" },
 ];
@@ -220,7 +221,7 @@ function LeagueStanding({ result, status, isError }: Props<{ revision?: number }
   const revision = result.my_revision ? `r${result.my_revision.revision}` : null;
   // The standing is one result: say it as a sentence with its sample size and window, not as a bare tile.
   const summary = mine && revision
-    ? `Your ${revision}${result.my_revision?.player ? `, playing as ${result.my_revision.player},` : ""} is ranked ${mine.rank} of ${result.entries ?? "?"} in ${leagueName}: score ${score(mine.score)}, ${mine.wins} wins in ${mine.games} games over the last ${window} hours.`
+    ? `Your ${revision}${result.my_revision?.player ? `, playing as ${result.my_revision.player},` : ""} is ranked ${mine.rank} of ${result.entries ?? "?"} in ${leagueName}: score ${score(mine.score)}, ${mine.time_limits === undefined ? `${mine.games} games` : `${mine.wins ?? 0} won, ${mine.losses ?? 0} lost, and ${mine.time_limits} reached the time limit in ${mine.games} games`} over the last ${window} hours.${mine.time_limits ? " Time-limit games score 0 and are not wins." : ""}`
     : result.submission && revision
       ? `Your ${revision} is submitted to ${leagueName} (${result.submission.status ?? "status unknown"}) and has no games in the last ${window} hours yet.`
       : revision && result.league_state !== "not_uploaded"

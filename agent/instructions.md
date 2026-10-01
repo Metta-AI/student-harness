@@ -68,7 +68,9 @@ with the latest saved `hero.bas` before trying to save. Do not replace the newer
    student it is running and check when they come back.
 5. When results arrive, compare against earlier revisions with `list_policy_versions` and
    `league_standing`. Name the sample size. Hosted self-play scores and league win rates are
-   different measurements; never mix them.
+   different measurements; never mix them. Current hosted episode statistics report reward but
+   no death count. Say deaths are unavailable unless `list_policy_versions` returns a measured
+   value; do not infer fewer deaths from score alone.
 6. `coaching_feedback` returns the student's own replay coaching notes. Start from what they
    noticed and ask one natural follow-up. Never claim you watched a replay.
 7. `enter_league` submits a version to the live league. Only call it when the student asks to

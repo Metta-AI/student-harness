@@ -49,6 +49,30 @@ sandbox network reaches only softmax.com, where the student's token is injected 
 upload bucket; the token itself never enters the sandbox. Softmax calls that record history run in the app runtime
 through typed tools.
 
+## Chat interface
+
+The chat is [assistant-ui](https://www.assistant-ui.com) on top of the eve session, through
+`useEveAgentRuntime` from `@assistant-ui/eve` (`components/chat.tsx`). eve owns the durable stream;
+assistant-ui renders it. The pieces:
+
+- `components/assistant-ui/elements/` holds the installed registry components (thread, attachments,
+  reasoning and tool groups, approval card, option list, elicitation form, chart, data table,
+  terminal block). They are owned source: restyle them here.
+- `components/assistant-ui/toolkit.tsx` maps each agent tool to a renderer. Schemas and executors
+  stay in `agent/tools/`; every toolkit entry is render-only.
+- Replies render with Streamdown. Reasoning and routine tool calls fold into a collapsible chain of
+  thought; approvals, questions, forms, tables and charts sit in the reply itself.
+- `ask_question`, `request_details` and `present` are agent tools that exist for the interface: a
+  pick list, a short form, and charts or tables built only from tool results.
+- Attachments, read-aloud and dictation are adapters in `components/chat-adapters.ts`. Read-aloud
+  and dictation use the browser's Web Speech API, so dictation needs Chrome, Edge or Safari.
+- Reloading mid-reply reopens the conversation and follows the in-flight turn. The active session
+  id is remembered per browser.
+
+Styling: Tailwind v4 is loaded without its global reset. `app/globals.css` maps the theme tokens to
+the Ink & Print palette, scopes the reset to `.aui-scope`, and keeps the older `app/styles.css` in
+its own cascade layer so the workspace is unaffected.
+
 Students can attach a `.bas` file (up to 64 KiB) or text notes (up to 256 KiB) in chat.
 Pastes over 4,000 characters are stored as text attachments and passed to the agent by ID.
 Both attachments and unsaved policy drafts survive reopened chats in `workspace_files`.

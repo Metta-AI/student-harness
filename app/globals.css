@@ -1,0 +1,177 @@
+/*
+  Layer order matters: the pre-Tailwind stylesheet sits in `legacy`, above the scoped reset in `base`
+  and below Tailwind utilities, so the workspace keeps its look and the chat's utilities still win.
+*/
+@layer theme, base, legacy, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "./styles.css" layer(legacy);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@import "tw-shimmer";
+@import "./generative-ui.css";
+
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+
+@custom-variant dark (&:is(.dark *));
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+/* Ink & Print: cream paper, warm near-black ink, navy for the one primary action. */
+:root {
+  --background: #fffdf4;
+  --foreground: #111827;
+  --card: #fffaf0;
+  --card-foreground: #111827;
+  --popover: #fffdf4;
+  --popover-foreground: #111827;
+  --primary: #0e2758;
+  --primary-foreground: #fffdf4;
+  --secondary: #f8f6ef;
+  --secondary-foreground: #111827;
+  --muted: #f8f6ef;
+  --muted-foreground: #5f5a52;
+  --accent: #eef2f7;
+  --accent-foreground: #1a3875;
+  --destructive: #b36e4e;
+  --border: #e4dac8;
+  --input: #d4c9b5;
+  --ring: #859ebe;
+  --radius: 3px;
+  --chart-1: #1a3875;
+  --chart-2: #6e8050;
+  --chart-3: #b36e4e;
+  --chart-4: #d4a853;
+  --chart-5: #859ebe;
+  --aui-success: #6e8050;
+  --aui-warning: #b8892f;
+  --ink-sage: #6e8050;
+  --ink-terracotta: #b36e4e;
+  --ink-gold: #b8892f;
+  --ink-navy: #1a3875;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-aui-success: var(--aui-success);
+  --color-aui-warning: var(--aui-warning);
+
+  /* The installed elements name stock palette steps; point those at the four earthy inks. */
+  --color-emerald-300: var(--ink-sage);
+  --color-emerald-400: var(--ink-sage);
+  --color-emerald-500: var(--ink-sage);
+  --color-emerald-600: var(--ink-sage);
+  --color-emerald-700: #55633d;
+  --color-red-200: var(--ink-terracotta);
+  --color-red-300: var(--ink-terracotta);
+  --color-red-400: var(--ink-terracotta);
+  --color-red-500: var(--ink-terracotta);
+  --color-red-600: var(--ink-terracotta);
+  --color-red-700: #8f5b3f;
+  --color-red-950: #5c3a28;
+  --color-amber-300: var(--ink-gold);
+  --color-amber-400: var(--ink-gold);
+  --color-amber-500: var(--ink-gold);
+  --color-amber-600: var(--ink-gold);
+  --color-amber-700: #8a6620;
+  --color-blue-400: var(--ink-navy);
+  --color-blue-500: var(--ink-navy);
+  --color-blue-600: var(--ink-navy);
+
+  /* Print radius: 3px for surfaces and controls, pills only where a class asks for `full`. */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 3px;
+  --radius-xl: 3px;
+  --radius-2xl: 3px;
+  --radius-3xl: 3px;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Marfa Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  @keyframes collapsible-down {
+    from { height: 0; }
+    to { height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto)); }
+  }
+  @keyframes collapsible-up {
+    from { height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto)); }
+    to { height: 0; }
+  }
+}
+
+/*
+  Tailwind's preflight, scoped. The chat thread and the popovers and dialogs it portals to <body>
+  get the reset the components were written against; everything else keeps the browser defaults
+  the workspace stylesheet was written against.
+*/
+@layer base {
+  :where(.aui-scope, [data-radix-popper-content-wrapper], [data-slot^="dialog"], [data-slot^="tooltip"]),
+  :where(.aui-scope, [data-radix-popper-content-wrapper], [data-slot^="dialog"], [data-slot^="tooltip"]) :where(*, ::before, ::after) {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0 solid;
+    border-color: var(--border);
+    outline-color: color-mix(in oklab, var(--ring) 60%, transparent);
+  }
+  :where(.aui-scope, [data-radix-popper-content-wrapper], [data-slot^="dialog"], [data-slot^="tooltip"]) {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    :where(h1, h2, h3, h4, h5, h6) { font-size: inherit; font-weight: inherit; letter-spacing: inherit; line-height: inherit; }
+    :where(ol, ul, menu) { list-style: none; }
+    :where(img, svg, video, canvas, audio, iframe) { display: block; vertical-align: middle; }
+    :where(img, video) { max-width: 100%; height: auto; }
+    :where(button, input, select, optgroup, textarea) { font: inherit; letter-spacing: inherit; color: inherit; border-radius: 0; background-color: transparent; opacity: 1; }
+    :where(a) { color: inherit; text-decoration: inherit; }
+    :where(table) { text-indent: 0; border-color: inherit; border-collapse: collapse; }
+    :where(code, kbd, samp, pre) { font-family: var(--font-mono); font-size: 1em; }
+    :where(textarea) { resize: vertical; }
+    :where(::placeholder) { opacity: 1; color: color-mix(in oklab, currentcolor 50%, transparent); }
+    :where([hidden]:not([hidden="until-found"])) { display: none !important; }
+    :where(button:not(:disabled), [role="button"]:not(:disabled)) { cursor: pointer; }
+  }
+}
+
+/* Reading text from Streamdown, sized for the chat column. Unlayered so it sits above Streamdown's own utilities. */
+.aui-md { font-size: 13.5px; line-height: 1.6; }
+.aui-md :where(h1, h2, h3, h4) { margin: 0.9em 0 0.35em; font-size: 13.5px; font-weight: 700; line-height: 1.35; letter-spacing: 0; }
+.aui-md :where(h1, h2, h3, h4):first-child { margin-top: 0; }
+.aui-md :where(p) { margin: 0 0 0.6em; }
+.aui-md :where(p:last-child) { margin-bottom: 0; }
+.aui-md :where(ul, ol) { margin: 0.3em 0 0.7em; padding-left: 1.25em; }
+.aui-md :where(ul) { list-style: disc; }
+.aui-md :where(ol) { list-style: decimal; }
+.aui-md :where(li) { margin: 0.15em 0; }
+.aui-md :where(:not(pre) > code) { padding: 0.05em 0.3em; border-radius: 2px; background: var(--muted); font-size: 0.9em; }
+.aui-md :where(a) { color: var(--accent-foreground); text-decoration: underline; text-underline-offset: 2px; }
+.aui-md :where(table) { font-size: 12.5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .aui-scope *, .aui-scope *::before, .aui-scope *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

@@ -22,6 +22,11 @@ export const events = {
   agentApprovalRequested: "agent_approval_requested",
   agentApprovalAnswered: "agent_approval_answered",
   agentError: "agent_error",
+  chatAttachmentAdded: "chat_attachment_added",
+  chatDictationStarted: "chat_dictation_started",
+  chatMessageSpoken: "chat_message_spoken",
+  chatMessageCopied: "chat_message_copied",
+  chatStreamResumed: "chat_stream_resumed",
   // Policy lifecycle (server-side, from the agent's tools)
   policyRevisionSaved: "policy_revision_saved",
   policyUploaded: "policy_uploaded",

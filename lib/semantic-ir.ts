@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+const canonicalJson = (value: unknown): string => JSON.stringify(value, (_key, item) =>
+  item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+    : item);
 const spanSchema = z.object({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), sha256: z.string().length(64), status: z.enum(["mapped", "stale"]) });
 const ruleSchema = z.object({
   id: z.string().min(1), when: z.string().min(1), skill: z.string().min(1), for: z.array(z.string().min(1)).min(1),
@@ -47,7 +51,7 @@ function revision(source: string, ir: SemanticIR): PolicyRevision {
   if (ir.execution.source_sha256 !== digest(source)) throw new Error("Semantic IR does not match source bytes");
   return {
     source, ir,
-    revisionId: digest(`${ir.update.parent ?? "root"}\n${digest(source)}\n${digest(JSON.stringify(ir))}`),
+    revisionId: digest(`${ir.update.parent ?? "root"}\n${digest(source)}\n${digest(canonicalJson(ir))}`),
     receipts: { representation: "partial", fidelity: "not_run", validity: "not_run", performance: "not_run",
       notes: ["Source spans and references checked; whole-program semantic extraction is unavailable for this BASIC policy.",
         "Behavioral intent and hosted performance need independent checks."] },
@@ -95,7 +99,9 @@ export const semanticFieldsSchema = semanticChangeSchema.shape.semantic;
 
 /** Apply one replaced span [start, end) -> after to the parent revision and record it as a new source-linked rule. */
 function applySpan(parent: PolicyRevision, start: number, end: number, after: string, summary: string, semantic: SemanticFields, evidence: string[]): PolicyRevision {
-  if (revision(parent.source, parent.ir).revisionId !== parent.revisionId) throw new Error("Parent revision changed since creation");
+  // Persisted JSONB can reorder keys, and older revision IDs used insertion order.
+  // Validate the parent content, then retain its stored ID as the chain pointer.
+  revision(parent.source, parent.ir);
   const source = parent.source.slice(0, start) + after + parent.source.slice(end);
   if (source === parent.source) throw new Error("Semantic change did not modify BASIC source");
   if (after.length === 0) throw new Error("Replacement span must keep at least one character to link the rule to source");
@@ -169,7 +175,7 @@ export function reconcileSource(parent: PolicyRevision, nextSource: string, summ
  * changing anything. Keeps every source link, bumps the revision, and records the intent.
  */
 export function baselineRevision(parent: PolicyRevision, summary: string, semantic: SemanticFields, evidence: string[]): PolicyRevision {
-  if (revision(parent.source, parent.ir).revisionId !== parent.revisionId) throw new Error("Parent revision changed since creation");
+  revision(parent.source, parent.ir);
   const ir = structuredClone(parent.ir);
   const n = ir.update.revision + 1;
   ir.belief.claims[`B_baseline_${n}`] = { claim: semantic.hypothesis, status: "untested", evidence };

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { importPolicy, reconcilePolicy } from "../lib/semantic-ir.ts";
@@ -88,4 +89,23 @@ test("baselineRevision records the unchanged starter as revision 1", async () =>
   assert.equal(baseline.ir.update.parent, parent.revisionId);
   assert.notEqual(baseline.revisionId, parent.revisionId);
   assert.ok(baseline.ir.strategy.every((rule) => rule.source.status === "mapped"));
+});
+
+test("a database JSONB round trip keeps saved revisions editable", async () => {
+  const { baselineRevision, reconcileSource } = await import("../lib/semantic-ir.ts");
+  const hash = (value) => createHash("sha256").update(value).digest("hex");
+  const root = importPolicy(starter, true);
+  const baseline = baselineRevision(root, "Baseline: official starter policy", change.semantic, []);
+  const legacyId = hash(`${root.revisionId}\n${hash(starter)}\n${hash(JSON.stringify(baseline.ir))}`);
+  const databaseIr = JSON.parse(JSON.stringify(baseline.ir, (_key, value) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+      : value));
+  assert.notEqual(legacyId, baseline.revisionId);
+  const next = starter.replace("sub chooseHero()", "' Draft preference experiment\nsub chooseHero()");
+  const fromMemory = reconcileSource({ ...baseline, revisionId: legacyId }, next, change.summary, change.semantic, []);
+  const fromDatabase = reconcileSource({ ...baseline, ir: databaseIr, revisionId: legacyId }, next, change.summary, change.semantic, []);
+  assert.equal(fromDatabase.ir.update.parent, legacyId);
+  assert.equal(fromDatabase.revisionId, fromMemory.revisionId);
+  assert.equal(fromDatabase.ir.update.revision, 2);
 });

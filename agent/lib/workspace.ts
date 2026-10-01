@@ -91,7 +91,7 @@ export async function hydrateWorkspace(sandbox: SandboxSession, subjectId: strin
   const root: PolicyVersionRow = {
     id: "starter", student_id: subjectId ?? "", revision_number: 0, revision_id: base.revisionId, parent_revision_id: null,
     summary: "Official starter policy", source: base.source, ir: base.ir, receipts: base.receipts, evidence: [],
-    softmax_policy_version_id: null, softmax_policy_label: null, created_at: new Date(0).toISOString(),
+    softmax_policy_version_id: null, softmax_policy_label: null, softmax_player_id: null, softmax_player_name: null, created_at: new Date(0).toISOString(),
   };
   await commitVersion(sandbox, root, []);
   for (const version of versions) {

@@ -97,6 +97,12 @@ export function useEveChatRuntime({ sessionId, disabled, adapters, threadList, o
     onCancel: async () => { await live.current.cancel(); },
     onRefetchThread: async () => { if (live.current.session) await live.current.resume(); },
     onRespondToToolApproval: async (response) => {
+      // The card appears as soon as the request event arrives, but eve keeps the turn open until the
+      // session reports it is waiting, which on a fresh session can take most of a minute. An answer
+      // sent inside that gap is rejected as a second turn, so hold it until the turn has parked.
+      for (let waited = 0; waited < 120000 && (live.current.status === "submitted" || live.current.status === "streaming"); waited += 100) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
       const current = live.current;
       let request;
       for (const message of current.data.messages) {

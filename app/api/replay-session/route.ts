@@ -1,18 +1,29 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { currentSession, sameOrigin } from "../../../lib/session";
-import { createReplaySession, getExperience, replaySessionReady } from "../../../lib/softmax";
+import { policyVersionBySoftmaxId } from "../../../lib/db";
+import { createReplaySession, getEpisodeRequest, getExperience, replaySessionReady } from "../../../lib/softmax";
 
-const requestSchema = z.object({
-  runId: z.string().regex(/^xreq_[0-9a-f-]{36}$/),
-  episodeId: z.string().regex(/^ereq_[0-9a-f-]{36}$/),
-});
+// A hosted practice game is addressed by the student's own run. A league-round episode has no run, so
+// it is addressed by the student's policy version that played in it.
+const requestSchema = z.union([
+  z.object({ runId: z.string().regex(/^xreq_[0-9a-f-]{36}$/), episodeId: z.string().regex(/^ereq_[0-9a-f-]{36}$/) }),
+  z.object({ policyVersionId: z.string().regex(/^[0-9a-f-]{36}$/), episodeId: z.string().regex(/^ereq_[0-9a-f-]{36}$/) }),
+]);
 
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
   const session = await currentSession();
   if (!session) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
-  const { runId, episodeId } = requestSchema.parse(await request.json());
+  const input = requestSchema.parse(await request.json());
+  if ("policyVersionId" in input) {
+    if (!(await policyVersionBySoftmaxId(session.subjectId, input.policyVersionId))) return NextResponse.json({ error: "That policy version is not one of your uploads" }, { status: 403 });
+    const episode = await getEpisodeRequest(session.token, input.episodeId);
+    if (!episode.round_id || !episode.policy_version_ids.includes(input.policyVersionId)) return NextResponse.json({ error: "Your policy did not play in this league episode" }, { status: 403 });
+    if (!episode.replay_url || !episode.coworld_id) return NextResponse.json({ error: "Replay unavailable" }, { status: 404 });
+    return NextResponse.json(await createReplaySession(session.token, episode.coworld_id, episode.replay_url));
+  }
+  const { runId, episodeId } = input;
   const run = await getExperience(session.token, runId);
   if (run.requester_user_id !== session.subjectId) {
     return NextResponse.json({ error: "This run is not yours" }, { status: 403 });

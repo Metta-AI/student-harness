@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { deleteWorkspaceFiles, latestPolicyVersion, listExperiments, listPolicyVersions, policyVersionByRevision, toRevision, workspaceFile } from "../../../lib/db";
+import { deleteWorkspaceFiles, latestPolicyVersion, listExperiments, listPolicyVersions, policyVersionByRevision, studentToken, toRevision, workspaceFile } from "../../../lib/db";
+import { backfillVersionPlayers, resolveStudentPlayer } from "../../../lib/player";
+import type { SoftmaxPlayer } from "../../../lib/softmax";
 import { currentSession, sameOrigin } from "../../../lib/session";
 
 /** The student's durable workspace: saved revisions, hosted games, and the latest revision pair. */
@@ -10,12 +12,23 @@ export async function GET(request: Request) {
   if (revisionParam) {
     const version = await policyVersionByRevision(session.subjectId, Number(revisionParam));
     if (!version) return NextResponse.json({ error: "Revision not found" }, { status: 404 });
-    return NextResponse.json({ revision: toRevision(version), upload: version.softmax_policy_version_id ? { policyVersionId: version.softmax_policy_version_id, label: version.softmax_policy_label } : null });
+    return NextResponse.json({ revision: toRevision(version), upload: version.softmax_policy_version_id ? { policyVersionId: version.softmax_policy_version_id, label: version.softmax_policy_label, player: version.softmax_player_name } : null });
   }
   const [versions, experiments, latest, draft, draftParent] = await Promise.all([
     listPolicyVersions(session.subjectId), listExperiments(session.subjectId), latestPolicyVersion(session.subjectId), workspaceFile(session.subjectId, "draft/hero.bas"), workspaceFile(session.subjectId, "draft/parent.txt"),
   ]);
   const uploaded = [...versions].reverse().find((version) => version.softmax_policy_version_id);
+  // The player is who Softmax credits this policy to. The student's default player is what the next
+  // upload will use; each uploaded version keeps the player Softmax recorded for it. Neither lookup
+  // may fail the workspace, so both fall back to "unknown".
+  const token = await studentToken(session.subjectId).catch(() => null);
+  const [player, filled] = token
+    ? await Promise.all([
+        resolveStudentPlayer(session.subjectId, token).catch((): SoftmaxPlayer | null => null),
+        backfillVersionPlayers(versions, token).catch(() => new Map<string, SoftmaxPlayer>()),
+      ])
+    : [null, new Map<string, SoftmaxPlayer>()];
+  const playerOf = (version: (typeof versions)[number]) => version.softmax_player_name ?? filled.get(version.id)?.name ?? null;
   return NextResponse.json({
     versions: versions.map((version) => {
       const games = experiments.filter((experiment) => experiment.policy_version_id === version.id);
@@ -24,7 +37,7 @@ export async function GET(request: Request) {
       const deaths = completed.map((game) => (game.summary as { mean_deaths_per_seat?: number | null } | null)?.mean_deaths_per_seat).filter((value): value is number => typeof value === "number");
       return {
         id: version.id, revision: version.revision_number, summary: version.summary, created_at: version.created_at,
-        policyVersionId: version.softmax_policy_version_id, label: version.softmax_policy_label,
+        policyVersionId: version.softmax_policy_version_id, label: version.softmax_policy_label, player: playerOf(version),
         games: games.length, hostedMean: scores.length ? scores.reduce((total, score) => total + score, 0) / scores.length : null, scored: scores.length,
         completedGames: completed.length, meanDeaths: deaths.length ? deaths.reduce((total, value) => total + value, 0) / deaths.length : null, deathSamples: deaths.length,
       };
@@ -37,7 +50,8 @@ export async function GET(request: Request) {
       revision: versions.find((version) => version.id === experiment.policy_version_id)?.revision_number ?? null,
     })),
     latest: latest ? toRevision(latest) : null,
-    latestUpload: uploaded ? { policyVersionId: uploaded.softmax_policy_version_id!, label: uploaded.softmax_policy_label ?? uploaded.softmax_policy_version_id! } : null,
+    latestUpload: uploaded ? { policyVersionId: uploaded.softmax_policy_version_id!, label: uploaded.softmax_policy_label ?? uploaded.softmax_policy_version_id!, player: playerOf(uploaded) } : null,
+    player: player ? { id: player.id, name: player.name } : null,
     draft: draft ? { updated_at: draft.updated_at, bytes: Buffer.byteLength(draft.content, "utf8"), conflict: latest ? draftParent?.content !== latest.revision_id : false } : null,
   });
 }

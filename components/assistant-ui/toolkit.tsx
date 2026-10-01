@@ -14,6 +14,7 @@ import { field, inkButton, mono } from "@/components/assistant-ui/elements/surfa
 import { TerminalBlock } from "@/components/assistant-ui/elements/terminal-block";
 import { ToolCall } from "@/components/assistant-ui/elements/tool-call";
 import { WebSearch } from "@/components/assistant-ui/elements/web-search";
+import { useChatThread } from "@/components/chat-context";
 import { track } from "@/lib/analytics";
 import { events } from "@/lib/analytics-events";
 import { fromWire, presentLibrary } from "@/lib/genui-library";
@@ -195,7 +196,7 @@ function Revisions({ result, status, isError }: Props<Record<string, never>, Rev
 type Standing = {
   league?: { name?: string; rounds_paused?: boolean }; window_hours?: number; entries?: number; note?: string;
   my_standing?: { rank: number; wins: number; games: number; win_rate: number; score: number } | null;
-  my_revision?: { revision: number; uploaded_as: string | null } | null;
+  my_revision?: { revision: number; uploaded_as: string | null; player?: string | null } | null;
   league_state?: LeagueState;
   submission?: { status?: string } | null;
   top?: { rank: number; policy: string; player: string; win_rate: number; games: number; score: number }[];
@@ -219,7 +220,7 @@ function LeagueStanding({ result, status, isError }: Props<{ revision?: number }
   const revision = result.my_revision ? `r${result.my_revision.revision}` : null;
   // The standing is one result: say it as a sentence with its sample size and window, not as a bare tile.
   const summary = mine && revision
-    ? `Your ${revision} is ranked ${mine.rank} of ${result.entries ?? "?"} in ${leagueName}: score ${score(mine.score)}, ${mine.wins} wins in ${mine.games} games over the last ${window} hours.`
+    ? `Your ${revision}${result.my_revision?.player ? `, playing as ${result.my_revision.player},` : ""} is ranked ${mine.rank} of ${result.entries ?? "?"} in ${leagueName}: score ${score(mine.score)}, ${mine.wins} wins in ${mine.games} games over the last ${window} hours.`
     : result.submission && revision
       ? `Your ${revision} is submitted to ${leagueName} (${result.submission.status ?? "status unknown"}) and has no games in the last ${window} hours yet.`
       : revision && result.league_state !== "not_uploaded"
@@ -252,11 +253,20 @@ const answer = async (respond: Props["respondToApproval"], response: ToolApprova
   }
 };
 
-function EnterLeague({ args, approval, respondToApproval, result, isError }: Props<{ revision?: number }, { revision?: number; policy_label?: string; status?: string }>) {
+function EnterLeague({ args, approval, respondToApproval, result, isError }: Props<{ revision?: number }, { revision?: number; policy_label?: string; player?: string | null; status?: string }>) {
   const [error, setError] = useState<string | null>(null);
-  const open = approval !== undefined && approval.approved === undefined && approval.resolution === undefined;
-  const state = !approval ? (result === undefined ? "running" : "done") : approval.approved === false || approval.resolution ? "denied" : approval.approved === undefined ? "request" : result === undefined ? "running" : "done";
-  const respond = (response: ToolApprovalResponse) => void answer(respondToApproval, response, "enter_league", setError).catch(() => undefined);
+  // Before the entry exists, the best answer for "who will this be credited to" is the student's default player.
+  const { playerName } = useChatThread();
+  const player = result?.player ?? playerName;
+  // The answer the student gave that eve has not confirmed yet. It can be held while the turn parks.
+  const [sent, setSent] = useState<"approve" | "deny" | null>(null);
+  const unanswered = approval !== undefined && approval.approved === undefined && approval.resolution === undefined;
+  const open = unanswered && sent === null;
+  const state = !approval ? (result === undefined ? "running" : "done") : approval.approved === false || approval.resolution ? "denied" : approval.approved === undefined ? (sent ? "running" : "request") : result === undefined ? "running" : "done";
+  const respond = (response: ToolApprovalResponse, choice: "approve" | "deny") => {
+    setSent(choice);
+    void answer(respondToApproval, response, "enter_league", setError).catch(() => setSent(null));
+  };
   return (
     <div className="my-2 flex flex-col gap-1.5">
       <ApprovalCard
@@ -269,11 +279,12 @@ function EnterLeague({ args, approval, respondToApproval, result, isError }: Pro
         details={[
           { label: "Revision", value: args.revision ? `r${args.revision}` : result?.revision ? `r${result.revision}` : "Latest uploaded" },
           ...(result?.policy_label ? [{ label: "Entered as", value: result.policy_label }] : []),
+          ...(player ? [{ label: "Player", value: player }] : []),
         ]}
         allowOnceLabel="Enter the league"
         denyLabel="Not now"
-        statusLabel={state === "denied" ? (approval?.resolution ? "Closed without a decision" : "Not entered") : isError ? errorText(result) : state === "running" ? "Approved, submitting" : `Submitted${result?.status ? `, ${result.status}` : ""}`}
-        {...(open ? { onAllowOnce: () => respond({ approved: true }), onDeny: () => respond({ approved: false, reason: "The student chose not to enter the league now." }) } : {})}
+        statusLabel={state === "denied" ? (approval?.resolution ? "Closed without a decision" : "Not entered") : isError ? errorText(result) : unanswered && sent ? (sent === "approve" ? "Sending your approval" : "Sending your answer") : state === "running" ? "Approved, submitting" : `Submitted${result?.status ? `, ${result.status}` : ""}`}
+        {...(open ? { onAllowOnce: () => respond({ approved: true }, "approve"), onDeny: () => respond({ approved: false, reason: "The student chose not to enter the league now." }, "deny") } : {})}
       />
       {error ? <p role="alert" className="text-xs text-red-600">{error}</p> : null}
     </div>
@@ -393,7 +404,7 @@ export const toolkit = defineToolkit({
   web_search: { type: "backend", render: WebSearchTool },
   load_skill: { type: "backend", render: Generic({ label: "Loaded rules", activeLabel: "Loading rules", query: field_("name", "game rules") }) },
   save_policy_version: { type: "backend", render: Generic({ label: "Saved revision", activeLabel: "Saving revision", query: (args, result) => (isRecord(result) && typeof result.revision === "number" ? `r${result.revision} · ` : "") + text(args.summary) }) },
-  upload_policy: { type: "backend", render: Generic({ label: "Uploaded to Softmax", activeLabel: "Uploading to Softmax", query: (args, result) => (isRecord(result) ? text(result.policy_label) : "") || text(args.policy_name) || (args.revision ? `r${text(args.revision)}` : "latest revision") }) },
+  upload_policy: { type: "backend", render: Generic({ label: "Uploaded to Softmax", activeLabel: "Uploading to Softmax", query: (args, result) => `${(isRecord(result) ? text(result.policy_label) : "") || text(args.policy_name) || (args.revision ? `r${text(args.revision)}` : "latest revision")}${isRecord(result) && text(result.player) ? ` · player ${text(result.player)}` : ""}` }) },
   request_hosted_game: { type: "backend", render: Generic({ label: "Requested hosted game", activeLabel: "Requesting hosted game", query: field_("title") }) },
   load_attachment: { type: "backend", render: Generic({ label: "Read attached file", activeLabel: "Reading attached file", query: (args, result) => (isRecord(result) ? basename(text(result.path)) : "") || text(args.type, "file") }) },
   coaching_feedback: { type: "backend", render: Generic({ label: "Read replay coaching", activeLabel: "Reading replay coaching", query: (args) => text(args.coaching_session_id) || (isRecord(args.episode) ? text(args.episode.episode_id) : "") || "sessions" }) },

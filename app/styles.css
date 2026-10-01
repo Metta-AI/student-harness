@@ -509,3 +509,37 @@ a:hover { text-decoration: underline; }
 .version-history { margin-bottom: 10px; gap: 0; }
 .version-history li button { padding: 4px 8px; border-radius: 3px; gap: 0 10px; }
 .version-empty { margin-bottom: 10px; }
+
+/* Player identity and the league / practice split on Matches */
+.player-label { color: var(--muted-ink); font-size: 11px; white-space: nowrap; }
+.player-label b, .policy-toolbar p b, .episodes-heading p b { color: var(--ink); font-weight: 600; }
+.performance-player { display: block; margin-top: 2px; color: var(--muted-ink); font-size: 10px; }
+.match-views { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 8px; }
+.match-views > div { display: flex; gap: 16px; }
+.match-views button { padding: 4px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted-ink); font-size: 13px; font-weight: 500; cursor: pointer; }
+.match-views button:hover { color: var(--ink); }
+.match-views button.active { border-bottom-color: #0e2758; color: var(--ink); font-weight: 600; }
+.match-views button:disabled { cursor: not-allowed; opacity: .6; }
+.match-views button span { margin-left: 3px; color: var(--muted-ink); font: 11px "Marfa Mono", monospace; font-weight: 400; }
+.match-views p { flex: 1; min-width: 240px; margin: 0; color: var(--muted-ink); font-size: 11px; line-height: 1.45; }
+.league-tally { margin: 0 0 8px; color: var(--muted-ink); font-size: 11px; line-height: 1.5; }
+.league-tally b { color: var(--ink); font-weight: 600; }
+.league-table th { padding: 6px 12px; white-space: nowrap; }
+.league-table th:first-child { width: auto; }
+.league-table td:first-child { min-width: 0; }
+.league-table td:first-child strong { width: auto; }
+.league-table tr.unplayable { cursor: default; }
+.league-table tr.unplayable:hover { background: transparent; }
+.league-table .against-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.league-table .against-cell small { margin-left: 8px; color: var(--muted-ink); font: 10px "Marfa Mono", monospace; }
+.league-table .result-cell { color: var(--muted-ink); }
+.league-table .result-cell.won { color: #0e2758; font-weight: 600; }
+.league-table .result-cell.lost { color: #8c3b2a; }
+.league-more { display: flex; align-items: center; gap: 12px; margin-top: 8px; color: var(--muted-ink); font-size: 11px; }
+.replay-footer > span { color: var(--muted-ink); font-size: 11px; }
+@media (max-width: 800px) {
+  .league-table { table-layout: auto; }
+  .league-table th:first-child { width: auto; }
+  .league-table th { padding: 6px 8px; }
+  .tabs .player-label { display: none; }
+}

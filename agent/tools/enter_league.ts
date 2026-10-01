@@ -18,6 +18,6 @@ export default defineTool({
     if (!version?.softmax_policy_version_id) throw new Error("Upload the revision with upload_policy before entering the league.");
     const submission = await submitPolicy(student.token, version.softmax_policy_version_id);
     await trackServer(student.subjectId, events.leagueEntered, { source: "agent", revision: version.revision_number, status: submission.status }, { league_entered: true });
-    return { revision: version.revision_number, policy_label: version.softmax_policy_label, submission_id: submission.id, status: submission.status };
+    return { revision: version.revision_number, policy_label: version.softmax_policy_label, player: submission.player?.name ?? version.softmax_player_name, submission_id: submission.id, status: submission.status };
   },
 });

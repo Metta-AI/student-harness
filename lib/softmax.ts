@@ -22,7 +22,14 @@ const submissionSchema = z.object({
   id: z.string(), status: z.string(), created_at: z.string().optional(),
   auto_champion: z.string().optional(),
   policy_version: z.object({ id: z.string() }).optional(),
+  player: z.object({ id: z.string(), name: z.string() }).nullable().optional(),
 });
+const playerSchema = z.object({ id: z.string(), name: z.string(), is_default: z.boolean(), disabled_at: z.string().nullable().optional() });
+const versionPlayerRow = z.object({ policy_version_id: z.string(), player_id: z.string().nullable().optional(), player_name: z.string().nullable().optional() });
+const versionPlayerPage = z.union([z.array(versionPlayerRow), z.object({ entries: z.array(versionPlayerRow) })]);
+
+/** A Softmax player: the public identity that policy versions and league entries are credited to. */
+export type SoftmaxPlayer = { id: string; name: string };
 const submissionPageSchema = z.union([z.array(submissionSchema), z.object({ entries: z.array(submissionSchema) })]);
 const leagueSchema = z.object({
   id: z.string(), name: z.string(), description: z.string().nullable(),
@@ -53,6 +60,25 @@ const episodeSchema = z.object({
 });
 const experiencePageSchema = z.object({ entries: z.array(experienceSchema), next_cursor: z.string().nullable() });
 const experienceDetailSchema = experienceSchema.extend({ episodes: z.array(episodeSchema) });
+const episodeRequestSummarySchema = z.object({
+  id: z.string(), status: z.string(), coworld_id: z.string().nullable(), round_id: z.string().nullable(),
+  replay_url: z.string().nullable(), policy_version_ids: z.array(z.string()), created_at: z.string(),
+});
+const episodeRequestPageSchema = z.object({ entries: z.array(episodeRequestSummarySchema), next_cursor: z.string().nullable() });
+const participantSchema = z.object({
+  position: z.number(), policy_version_id: z.string().optional(), policy_name: z.string().optional(),
+  version: z.number().optional(), player_name: z.string().nullable().optional(),
+});
+const seatScoreSchema = z.object({ position: z.number(), score: z.number() });
+const episodeResultSchema = z.object({
+  id: z.string(), status: z.string(), error: z.string().nullable().optional(), replay_url: z.string().nullable().optional(),
+  participants: z.array(participantSchema).nullable(), participant_scores: z.array(seatScoreSchema).nullable(),
+});
+const episodeRequestSchema = z.object({
+  id: z.string(), status: z.string(), round_id: z.string().nullable(), coworld_id: z.string().nullable(),
+  episode_id: z.string().nullable(), replay_url: z.string().nullable(), policy_version_ids: z.array(z.string()),
+});
+const roundPageSchema = z.object({ entries: z.array(z.object({ id: z.string(), round_number: z.number() })), next_cursor: z.string().nullable() });
 const coachingAnalysisSummarySchema = z.object({ id: z.string(), status: z.string(), phase: z.string().nullable().optional(), error: z.string().nullable().optional() });
 const coachingSessionSchema = z.object({
   id: z.string(), episode_id: z.string(), user_id: z.string(), coworld_name: z.string().nullable(),
@@ -119,6 +145,21 @@ export async function whoami(token: string) {
   return softmax("/whoami", token, whoamiSchema);
 }
 
+/** The player Softmax credits the caller's uploads and league entries to unless another is named. */
+export async function getDefaultPlayer(token: string): Promise<SoftmaxPlayer | null> {
+  const players = (await softmax("/players", token, z.array(playerSchema))).filter((player) => !player.disabled_at);
+  const player = players.find((candidate) => candidate.is_default) ?? players[0];
+  return player ? { id: player.id, name: player.name } : null;
+}
+
+/** The player Softmax recorded for one of the caller's policy versions, or null when none is assigned. */
+export async function getPolicyVersionPlayer(token: string, policyVersionId: string): Promise<SoftmaxPlayer | null> {
+  const params = new URLSearchParams({ mine: "true", policy_version_id: policyVersionId, limit: "1" });
+  const page = await softmax(`/v2/policy-versions?${params}`, token, versionPlayerPage);
+  const row = (Array.isArray(page) ? page : page.entries).find((entry) => entry.policy_version_id === policyVersionId);
+  return row?.player_id && row.player_name ? { id: row.player_id, name: row.player_name } : null;
+}
+
 export async function getLeague(token: string) {
   return softmax(`/v2/leagues/${league.id}`, token, leagueSchema);
 }
@@ -159,6 +200,44 @@ export async function listExperiences(token: string) {
     cursor = page.next_cursor;
   } while (cursor);
   return experiences;
+}
+
+/** One page of the episodes a policy version was scheduled into, newest first. Round episodes carry a round ID. */
+export async function listPolicyVersionEpisodeRequests(token: string, policyVersionId: string, cursor?: string | null) {
+  const params = new URLSearchParams({ limit: "50" });
+  if (cursor) params.set("cursor", cursor);
+  return softmax(`/v2/policy-versions/${policyVersionId}/episode-requests?${params}`, token, episodeRequestPageSchema);
+}
+
+/** Seats and per-seat scores for up to 50 episode requests in one call. */
+export async function getEpisodeResults(token: string, episodeRequestIds: string[]) {
+  if (!episodeRequestIds.length) return [];
+  const params = new URLSearchParams({ view: "results", limit: "200" });
+  for (const id of episodeRequestIds) params.append("ids", id);
+  const page = await softmax(`/v2/episode-requests?${params}`, token, z.object({ entries: z.array(episodeResultSchema) }));
+  return page.entries;
+}
+
+export async function getEpisodeRequest(token: string, episodeRequestId: string) {
+  return softmax(`/v2/episode-requests/${episodeRequestId}`, token, episodeRequestSchema);
+}
+
+// Round numbers never change once a round exists, so they are kept for the life of the server instance.
+const leagueRounds = new Map<string, number>();
+
+/** Round numbers for this league's rounds. IDs that belong to another league are left out. */
+export async function leagueRoundNumbers(token: string, roundIds: string[]) {
+  if (roundIds.some((id) => !leagueRounds.has(id))) {
+    let cursor: string | null = null;
+    do {
+      const params = new URLSearchParams({ league_id: league.id, limit: "200" });
+      if (cursor) params.set("cursor", cursor);
+      const page: z.infer<typeof roundPageSchema> = await softmax(`/v2/rounds?${params}`, token, roundPageSchema);
+      for (const round of page.entries) leagueRounds.set(round.id, round.round_number);
+      cursor = page.next_cursor;
+    } while (cursor && roundIds.some((id) => !leagueRounds.has(id)));
+  }
+  return new Map(roundIds.filter((id) => leagueRounds.has(id)).map((id) => [id, leagueRounds.get(id)!]));
 }
 
 const replayViewerHost = /^(?:[a-z0-9-]+\.cloudfront\.net|softmax\.com|[a-z0-9-]+\.softmax\.com)$/;
@@ -254,7 +333,7 @@ export function policyStyleFromSummary(summary: string) {
   return terms.length === 2 ? terms.join("-") : terms.length === 1 ? `${terms[0]}-focus` : "balanced-starter";
 }
 
-export async function uploadPolicy(token: string, subjectId: string, source: string, title: string, policyName?: string) {
+export async function uploadPolicy(token: string, subjectId: string, source: string, title: string, policyName?: string, playerId?: string) {
   const bytes = Buffer.from(source, "utf8");
   const contentHash = createHash("sha256").update(bytes).digest("hex");
   const name = policyName ?? policyNameFor(subjectId, "arena-hero");
@@ -263,6 +342,8 @@ export async function uploadPolicy(token: string, subjectId: string, source: str
     content_hash: contentHash,
     size_bytes: bytes.length,
     tags: { title: title.slice(0, 50), description: "Student policy edited in NeuralHub harness" },
+    // Name the player explicitly so the version is credited to the one the student was shown.
+    ...(playerId ? { player_id: playerId } : {}),
   };
   // The object store is content-addressed across policy names. A 409 means the bytes
   // are already present; /complete creates or reuses this student's policy version.

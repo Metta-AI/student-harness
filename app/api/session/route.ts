@@ -4,6 +4,7 @@ import { upsertStudent } from "../../../lib/db";
 import { identifyServer, trackServer } from "../../../lib/analytics-server";
 import { events } from "../../../lib/analytics-events";
 import { cookieName, currentSession, sameOrigin, setSessionCookie } from "../../../lib/session";
+import { resolveStudentPlayer } from "../../../lib/player";
 import { SoftmaxError, whoami } from "../../../lib/softmax";
 
 export async function GET() {
@@ -25,6 +26,8 @@ export async function POST(request: Request) {
   // The coach's tools run in a durable session with no request cookie, so the token is kept
   // sealed in the student's row and looked up by subject ID.
   await upsertStudent({ subjectId: identity.subject_id, email: identity.user_email, token });
+  // Record which Softmax player this student's uploads are credited to, so the workspace can show it.
+  await resolveStudentPlayer(identity.subject_id, token, { refresh: true }).catch(() => null);
   await identifyServer(identity.subject_id, { email: identity.user_email, name: identity.name ?? undefined });
   await trackServer(identity.subject_id, events.signedIn, { source: "server" });
   return setSessionCookie({ email: identity.user_email, subjectId: identity.subject_id }, {

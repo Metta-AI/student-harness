@@ -6,9 +6,10 @@ import { events } from "../lib/analytics-events";
 import type { ReasoningEffort } from "../lib/reasoning";
 
 export type ChatReference = {
-  kind: "coaching-session" | "replay-note" | "policy-results";
+  kind: "coaching-session" | "replay-note" | "policy-results" | "league-episode";
   label: string;
   episodeId: string;
+  /** The student's hosted run. Empty for a league-round episode, which is addressed by `policyVersionId`. */
   runId: string;
   coachingSessionId?: string;
   policyVersionId?: string;
@@ -53,7 +54,8 @@ export function parseReference(text: string): ChatReference | null {
   if (!match) return null;
   try {
     const value = JSON.parse(match[1]!) as Partial<ChatReference>;
-    if (!value.kind || !value.label || !value.episodeId || !value.runId) return null;
+    if (!value.kind || !value.label || !value.episodeId) return null;
+    if (value.kind === "league-episode" ? !value.policyVersionId : !value.runId) return null;
     return value as ChatReference;
   } catch {
     return null;
@@ -85,7 +87,7 @@ export const speakable = (text: string) => stripAgentBlocks(text)
   .replace(/\s+\n/g, "\n")
   .trim();
 
-const referenceKindLabel: Record<ChatReference["kind"], string> = { "coaching-session": "Coaching session", "replay-note": "Replay note", "policy-results": "Policy results" };
+const referenceKindLabel: Record<ChatReference["kind"], string> = { "coaching-session": "Coaching session", "replay-note": "Replay note", "policy-results": "Policy results", "league-episode": "League episode" };
 
 export function ReferenceChip({ reference, onOpen }: { reference: ChatReference; onOpen: (reference: ChatReference) => void }) {
   return (
@@ -113,6 +115,8 @@ export type ChatThreadValue = {
   /** How much the agent reasons before acting; saved per student and applied from the next model call. */
   reasoningEffort: ReasoningEffort;
   onReasoningEffort: (effort: ReasoningEffort) => void;
+  /** The Softmax player the student's uploads and league entries are credited to, when known. */
+  playerName: string | null;
 };
 
 const ChatThreadContext = createContext<ChatThreadValue | null>(null);

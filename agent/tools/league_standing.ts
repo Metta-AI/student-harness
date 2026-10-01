@@ -22,7 +22,7 @@ export default defineTool({
     return {
       league: { name: league.name, rounds_paused: !!league.rounds_paused_at, submissions_locked: !!league.submissions_locked_at },
       window_hours: 72,
-      my_revision: version ? { revision: version.revision_number, uploaded_as: version.softmax_policy_label } : null,
+      my_revision: version ? { revision: version.revision_number, uploaded_as: version.softmax_policy_label, player: version.softmax_player_name } : null,
       submission: submission ? { id: submission.id, status: submission.status, created_at: submission.created_at, auto_champion: submission.auto_champion } : null,
       league_state: leagueState(version?.softmax_policy_version_id ?? null, !!submission, mine?.episodes_played ?? 0),
       ranking_metric: "score",

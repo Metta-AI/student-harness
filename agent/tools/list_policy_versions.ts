@@ -23,7 +23,7 @@ export default defineTool({
         const submission = submissions.find((entry) => entry.policy_version?.id === version.softmax_policy_version_id);
         return {
           revision: version.revision_number, summary: version.summary, created_at: version.created_at, evidence: version.evidence,
-          uploaded_as: version.softmax_policy_label, policy_version_id: version.softmax_policy_version_id,
+          uploaded_as: version.softmax_policy_label, player: version.softmax_player_name, policy_version_id: version.softmax_policy_version_id,
           hosted_games: games.map((game) => ({ xp_request_id: game.xp_request_id, title: game.title, status: game.status, hypothesis: game.hypothesis })),
           hosted_mean_score: scores.length ? scores.reduce((total, score) => total + score, 0) / scores.length : null,
           hosted_scored_seats: scores.length,

@@ -18,7 +18,14 @@ the replay and lets the student save a timestamped observation in a chat instead
 
 ## Policy and match statistics
 
-The Matches table sorts by episode, exact policy version, played time, hosted score, or policy win percentage. Choose a policy version to filter hosted matches and compare its mean hosted score with its league result. The live win percentage comes from Softmax's competition policy leaderboard over the last 72 hours (`wins / episodes_played`); ties for first count as wins. Hosted self-play scores stay separate. A version with no league games in that window shows no win percentage. **Discuss results** gives the coach that exact version's league sample and a hosted episode's statistics so recommendations can name a measurable hypothesis.
+Matches lists two different things, kept apart:
+
+- **League rounds** are the episodes the NeuralHub league scheduled for one uploaded policy version against other players' policies. They decide its rank. Each row shows the round number, when it ran, the side and number of heroes the policy controlled, who it played, the result, and its mean score per hero. Rows come from Softmax's episode requests for that policy version (`/api/league-episodes`), newest first, 50 at a time. The result is read from the two side totals: a positive side total is a win for that side, and all ten heroes at 0 is a match that hit the time limit with no fort destroyed.
+- **Practice games** are hosted self-play that the student or the agent requested, where one policy controls all ten heroes. They never count in the league. This table sorts by episode, exact policy version, played time, hosted score, or policy win percentage.
+
+The page opens on the newest revision that is entered in the league; choose another uploaded version to see its episodes. The live win percentage comes from Softmax's competition policy leaderboard over the last 72 hours (`wins / episodes_played`); ties for first count as wins, so time-limit games count toward it. Practice scores stay separate. A version with no league games in that window shows no win percentage. **Discuss results** gives the coach that exact version's league sample and a hosted episode's statistics so recommendations can name a measurable hypothesis. A note on a league replay sends the coach that episode's round, side, result, score, and roster.
+
+Every upload and league entry is credited to a Softmax **player**. The workspace header names the student's default player, the Policy tab names the player each uploaded revision is credited to, and the chat names it on the upload row and on the league approval card before the student approves.
 
 The app may show replay-derived behavior metrics when a dated snapshot contains the exact selected policy version. Those metrics remain separate from live NeuralHub league results.
 

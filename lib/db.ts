@@ -53,6 +53,20 @@ export async function setStudentPolicyName(subjectId: string, policyName: string
   if (result.error) throw new Error(`save policy name: ${result.error.message}`);
 }
 
+/** The student's default Softmax player as last seen, or null before it has been looked up. */
+export async function studentPlayer(subjectId: string): Promise<{ id: string; name: string } | null> {
+  const result = await db().from("students").select("softmax_player_id, softmax_player_name").eq("subject_id", subjectId).maybeSingle();
+  if (result.error) throw new Error(`load player: ${result.error.message}`);
+  const id = result.data?.softmax_player_id as string | null | undefined;
+  const name = result.data?.softmax_player_name as string | null | undefined;
+  return id && name ? { id, name } : null;
+}
+
+export async function setStudentPlayer(subjectId: string, player: { id: string; name: string }) {
+  const result = await db().from("students").update({ softmax_player_id: player.id, softmax_player_name: player.name }).eq("subject_id", subjectId);
+  if (result.error) throw new Error(`save player: ${result.error.message}`);
+}
+
 export async function studentReasoningEffort(subjectId: string): Promise<ReasoningEffort> {
   const result = await db().from("students").select("reasoning_effort").eq("subject_id", subjectId).maybeSingle();
   if (result.error) throw new Error(`load reasoning effort: ${result.error.message}`);
@@ -72,11 +86,12 @@ const policyVersionRow = z.object({
   parent_revision_id: z.string().nullable(), summary: z.string(), source: z.string(),
   ir: z.unknown(), receipts: z.unknown(), evidence: z.array(z.string()),
   softmax_policy_version_id: z.string().nullable(), softmax_policy_label: z.string().nullable(),
+  softmax_player_id: z.string().nullable(), softmax_player_name: z.string().nullable(),
   created_at: z.string(),
 });
 export type PolicyVersionRow = z.infer<typeof policyVersionRow>;
-const versionColumns = "id, student_id, revision_number, revision_id, parent_revision_id, summary, source, ir, receipts, evidence, softmax_policy_version_id, softmax_policy_label, created_at";
-const versionListColumns = "id, student_id, revision_number, revision_id, parent_revision_id, summary, evidence, softmax_policy_version_id, softmax_policy_label, created_at";
+const versionColumns = "id, student_id, revision_number, revision_id, parent_revision_id, summary, source, ir, receipts, evidence, softmax_policy_version_id, softmax_policy_label, softmax_player_id, softmax_player_name, created_at";
+const versionListColumns = "id, student_id, revision_number, revision_id, parent_revision_id, summary, evidence, softmax_policy_version_id, softmax_policy_label, softmax_player_id, softmax_player_name, created_at";
 
 export function toRevision(row: PolicyVersionRow): PolicyRevision {
   return { source: row.source, ir: row.ir as PolicyRevision["ir"], revisionId: row.revision_id, receipts: row.receipts as PolicyRevision["receipts"] };
@@ -126,9 +141,18 @@ export async function insertPolicyVersion(input: { studentId: string; revision: 
   return policyVersionRow.parse(row);
 }
 
-export async function markPolicyUploaded(id: string, softmax: { policyVersionId: string; label: string }) {
-  const result = await db().from("policy_versions").update({ softmax_policy_version_id: softmax.policyVersionId, softmax_policy_label: softmax.label }).eq("id", id);
+export async function markPolicyUploaded(id: string, softmax: { policyVersionId: string; label: string; player?: { id: string; name: string } | null }) {
+  const result = await db().from("policy_versions").update({
+    softmax_policy_version_id: softmax.policyVersionId, softmax_policy_label: softmax.label,
+    ...(softmax.player ? { softmax_player_id: softmax.player.id, softmax_player_name: softmax.player.name } : {}),
+  }).eq("id", id);
   if (result.error) throw new Error(`mark uploaded: ${result.error.message}`);
+}
+
+/** Record the player Softmax credited an already-uploaded version to. */
+export async function setPolicyVersionPlayer(id: string, player: { id: string; name: string }) {
+  const result = await db().from("policy_versions").update({ softmax_player_id: player.id, softmax_player_name: player.name }).eq("id", id);
+  if (result.error) throw new Error(`save version player: ${result.error.message}`);
 }
 
 // ---------- experiments ----------

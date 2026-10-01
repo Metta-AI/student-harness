@@ -34,8 +34,13 @@ function InitialRequest({ request, sendPrompt }: { request: AnalysisRequest | nu
   const sent = useRef(false);
   useEffect(() => {
     if (!request || sent.current) return;
-    sent.current = true;
-    sendPrompt(request.reference ? withReference(request.text, request.reference) : request.text, request.context);
+    // Send after the mount has settled. Development strict mode mounts, unmounts, and remounts the
+    // thread; a send made during the first pass is dropped with the agent connection it started on.
+    const timer = window.setTimeout(() => {
+      sent.current = true;
+      sendPrompt(request.reference ? withReference(request.text, request.reference) : request.text, request.context);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [request, sendPrompt]);
   return null;
 }
@@ -226,7 +231,7 @@ function RailChrome({ title, onNew, onSignOut, signOutDisabled, children }: { ti
   );
 }
 
-function ChatThread({ sessionId, title, threadList, initialRequest, onSession, onActivity, onNotice, onOpenReference, onArchive, onNew, onSignOut, fallbackSuggestions, starterPrompt, disabled, reasoningEffort, onReasoningEffort }: {
+function ChatThread({ sessionId, title, threadList, initialRequest, onSession, onActivity, onNotice, onOpenReference, onArchive, onNew, onSignOut, fallbackSuggestions, starterPrompt, disabled, reasoningEffort, onReasoningEffort, playerName }: {
   title: string; threadList: ExternalStoreThreadListAdapter; onNew: () => void; onSignOut: () => void;
   sessionId: string | null; initialRequest: AnalysisRequest | null;
   onSession: (sessionId: string, title: string) => void; onActivity: (kind: "tool" | "turn") => void;
@@ -234,6 +239,7 @@ function ChatThread({ sessionId, title, threadList, initialRequest, onSession, o
   onOpenReference: (reference: ChatReference) => void; onArchive: () => void; fallbackSuggestions: string[];
   starterPrompt: StarterPrompt | null; disabled: boolean;
   reasoningEffort: ReasoningEffort; onReasoningEffort: (effort: ReasoningEffort) => void;
+  playerName: string | null;
 }) {
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   const startedFrom = useRef<string>(initialRequest ? initialRequest.context?.kind ?? "workspace" : "composer");
@@ -312,7 +318,7 @@ function ChatThread({ sessionId, title, threadList, initialRequest, onSession, o
   const sentHere = useCallback(() => sent.current, []);
   const noteSent = useCallback(() => { sent.current = true; }, []);
 
-  const value = useMemo<ChatThreadValue>(() => ({ resuming: status === "resuming", starterPrompt, fallbackSuggestions, onOpenReference, sendPrompt, reasoningEffort, onReasoningEffort }), [fallbackSuggestions, onOpenReference, onReasoningEffort, reasoningEffort, sendPrompt, starterPrompt, status]);
+  const value = useMemo<ChatThreadValue>(() => ({ resuming: status === "resuming", starterPrompt, fallbackSuggestions, onOpenReference, sendPrompt, reasoningEffort, onReasoningEffort, playerName }), [fallbackSuggestions, onOpenReference, onReasoningEffort, playerName, reasoningEffort, sendPrompt, starterPrompt, status]);
   const components = useMemo(() => ({ Welcome }), []);
 
   return (
@@ -341,10 +347,11 @@ function ChatThread({ sessionId, title, threadList, initialRequest, onSession, o
   );
 }
 
-export function Chat({ onActivity, onNotice, onSignOut, onOpenReference, analysisRequest, suggestions, starterPrompt, recordingCoaching }: {
+export function Chat({ onActivity, onNotice, onSignOut, onOpenReference, analysisRequest, suggestions, starterPrompt, recordingCoaching, playerName }: {
   onActivity: (kind: "tool" | "turn") => void; onSignOut: () => void; onOpenReference: (reference: ChatReference) => void;
   onNotice: (title: string, detail: string) => void;
   analysisRequest: AnalysisRequest | null; suggestions: string[]; starterPrompt: StarterPrompt | null; recordingCoaching: boolean;
+  playerName: string | null;
 }) {
   const [chats, setChats] = useState<ChatRow[]>([]);
   // `active` is the highlighted conversation; `thread` is what is mounted. A new chat keeps its mount when eve assigns its session.
@@ -462,6 +469,6 @@ export function Chat({ onActivity, onNotice, onSignOut, onOpenReference, analysi
   const title = chats.find((chat) => chat.session_id === active)?.title || "New chat";
 
   return <aside className="chat-rail aui-scope">
-    <ChatThread key={thread.key} sessionId={thread.sessionId} title={title} threadList={threadList} initialRequest={thread.sessionId ? null : request} onSession={onSession} onActivity={onActivity} onNotice={onNotice} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} onNew={() => startNew(null)} onSignOut={onSignOut} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} reasoningEffort={reasoningEffort} onReasoningEffort={changeReasoningEffort} />
+    <ChatThread key={thread.key} sessionId={thread.sessionId} title={title} threadList={threadList} initialRequest={thread.sessionId ? null : request} onSession={onSession} onActivity={onActivity} onNotice={onNotice} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} onNew={() => startNew(null)} onSignOut={onSignOut} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} reasoningEffort={reasoningEffort} onReasoningEffort={changeReasoningEffort} playerName={playerName} />
   </aside>;
 }

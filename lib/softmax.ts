@@ -249,6 +249,11 @@ export function policyNameFor(subjectId: string, character: string) {
   return `${slug || "arena-hero"}-${suffix}`;
 }
 
+export function policyStyleFromSummary(summary: string) {
+  const terms = [...new Set((summary.toLowerCase().match(/\b(?:towers?|forts?|lanes?|rangers?|vanguards?|berserkers?|hunters?|liches|lich|retreat|defend|push|farm|siege|kite|heal|draft|mid)\b/g) ?? []).map((term) => term === "liches" ? "lich" : term.replace(/s$/, "")))].slice(0, 2);
+  return terms.length === 2 ? terms.join("-") : terms.length === 1 ? `${terms[0]}-focus` : "balanced-starter";
+}
+
 export async function uploadPolicy(token: string, subjectId: string, source: string, title: string, policyName?: string) {
   const bytes = Buffer.from(source, "utf8");
   const contentHash = createHash("sha256").update(bytes).digest("hex");

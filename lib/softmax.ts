@@ -18,7 +18,11 @@ const uploadSchema = z.object({
 
 const policyVersionSchema = z.object({ id: z.string(), name: z.string(), version: z.number() });
 const xpSchema = z.object({ id: z.string(), status: z.string() });
-const submissionSchema = z.object({ id: z.string(), status: z.string() });
+const submissionSchema = z.object({
+  id: z.string(), status: z.string(), created_at: z.string().optional(),
+  auto_champion: z.string().optional(),
+  policy_version: z.object({ id: z.string() }).optional(),
+});
 const submissionPageSchema = z.union([z.array(submissionSchema), z.object({ entries: z.array(submissionSchema) })]);
 const leagueSchema = z.object({
   id: z.string(), name: z.string(), description: z.string().nullable(),
@@ -128,6 +132,20 @@ export async function getCompetitionDivision(token: string) {
 
 export async function getPolicyLeaderboard(token: string, divisionId: string) {
   return softmax(`/v2/divisions/${divisionId}/policy-leaderboard?window_minutes=4320`, token, policyLeaderboardSchema);
+}
+
+export async function listLeagueSubmissions(token: string) {
+  const entries: z.infer<typeof submissionSchema>[] = [];
+  let cursor: string | null = null;
+  do {
+    const params = new URLSearchParams({ mine: "true", league_id: league.id, limit: "100" });
+    if (cursor) params.set("cursor", cursor);
+    const page = await softmax(`/v2/league-submissions?${params}`, token,
+      z.union([z.array(submissionSchema), z.object({ entries: z.array(submissionSchema), next_cursor: z.string().nullable().optional() })]));
+    entries.push(...(Array.isArray(page) ? page : page.entries));
+    cursor = Array.isArray(page) ? null : page.next_cursor ?? null;
+  } while (cursor);
+  return entries;
 }
 
 export async function listExperiences(token: string) {

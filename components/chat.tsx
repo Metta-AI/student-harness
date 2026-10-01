@@ -67,11 +67,16 @@ const toolLabels: Record<string, string> = {
   load_attachment: "Read an attached file",
 };
 
+const backgroundTools = new Set(["bash", "read_file", "glob", "grep", "web_fetch", "web_search", "load_skill", "list_policy_versions", "league_standing", "hosted_game_status", "coaching_feedback"]);
+
+function visibleTool(part: Extract<EveMessagePart, { type: "dynamic-tool" }>) {
+  return !backgroundTools.has(part.toolName) || part.state === "output-error" || part.state === "approval-requested";
+}
+
 function toolLine(part: Extract<EveMessagePart, { type: "dynamic-tool" }>) {
   const base = toolLabels[part.toolName] ?? part.toolName.replaceAll("_", " ");
   const input = part.input as Record<string, unknown> | undefined;
-  const detail = part.toolName === "bash" && typeof input?.command === "string" ? input.command
-    : (part.toolName === "write_file" || part.toolName === "read_file") && typeof input?.filePath === "string" ? input.filePath
+  const detail = part.toolName === "write_file" && typeof input?.filePath === "string" ? input.filePath
     : part.toolName === "save_policy_version" && typeof input?.summary === "string" ? input.summary
     : part.toolName === "request_hosted_game" && typeof input?.title === "string" ? input.title
     : "";
@@ -110,10 +115,11 @@ function Message({ message, onRespond, onOpenReference, disabled }: { message: E
       {attachments.map((item, index) => <span key={index} className="message-attachment">{item.type === "policy" ? "BASIC policy" : "Text"} · {item.name} · {Math.ceil(item.bytes / 1024)} KiB</span>)}
       {reference ? <ReferenceChip reference={reference} onOpen={onOpenReference} /> : null}</article>;
   }
-  // Group consecutive tool parts so activity reads as one compact list.
+  // Show actions that change the student's policy; the reply explains read-only checks.
   const grouped: (EveMessagePart | EveMessagePart[])[] = [];
   for (const part of parts) {
     const last = grouped.at(-1);
+    if (part.type === "dynamic-tool" && !visibleTool(part)) continue;
     if (part.type === "dynamic-tool" && Array.isArray(last)) last.push(part);
     else if (part.type === "dynamic-tool") grouped.push([part]);
     else grouped.push(part);

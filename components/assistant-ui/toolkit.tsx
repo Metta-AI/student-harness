@@ -295,6 +295,43 @@ function EnterLeague({ args, approval, respondToApproval, result, isError }: Pro
 type AskArgs = { question?: string; options?: { label: string; description?: string }[] };
 type AskResult = { status?: "answered" | "dismissed" | "unavailable"; answer?: string };
 
+function ResearchAuthority({ args, approval, respondToApproval, result, isError }: Props) {
+  const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+  const unanswered = approval !== undefined && approval.approved === undefined && approval.resolution === undefined;
+  const state = approval?.approved === false || approval?.resolution ? "denied" : unanswered && !sent ? "request" : result === undefined ? "running" : "done";
+  const action = text(args.action);
+  const allowance = isRecord(args.allowance) ? args.allowance : null;
+  const cycle = isRecord(args.cycle) ? args.cycle : null;
+  const note = isRecord(args.note) ? args.note : null;
+  const review = isRecord(args.review) ? args.review : null;
+  const titles: Record<string, string> = { grant: "Fund this research cycle", create: "Start a research cycle", record: "Record your contribution", review: "Record your review", select: "Select the active policy", control: `${text(args.control)} research` };
+  const details = allowance ? [
+    { label: "Total allowance", value: `${text(allowance.modelCalls)} model calls · ${text(allowance.hostedGames)} hosted games` },
+    { label: "Starts", value: allowance.autonomy ? "Preston may run proposed experiments between visits" : "Manual starts" },
+    { label: "Expires", value: text(allowance.expiresAt) },
+    { label: "Reported-spend review", value: `$${text(allowance.costReviewUsd)} · not a hard billing cap` },
+  ] : [
+    ...(cycle ? [{ label: "Question", value: text(cycle.question) }, { label: "Evidence criteria", value: text(cycle.criteria) }] : []),
+    ...(note ? [{ label: text(note.kind), value: text(note.text) }] : []),
+    ...(review ? [{ label: text(review.finding), value: text(review.explanation) }] : []),
+    ...(args.reason ? [{ label: "Reason", value: text(args.reason) }] : []),
+  ];
+  const respond = (approved: boolean) => {
+    setSent(true);
+    void answer(respondToApproval, { approved }, "research_authority", setError).catch(() => setSent(false));
+  };
+  return <div className="my-2 flex flex-col gap-1.5"><ApprovalCard className="max-w-md" state={state}
+    title={titles[action] ?? "Research decision"} subtitle="Gods of the Arena"
+    description={allowance ? "Includes already consumed and reserved capacity. Conversation costs are separate. League entry requires a separate decision." : "This decision is attributed to you in the research record."}
+    details={details} allowOnceLabel="Confirm this decision" denyLabel="Not now"
+    statusLabel={isError ? errorText(result) : state === "done" ? "Decision recorded" : state === "denied" ? "Not authorized" : "Recording your decision"}
+    {...(unanswered && !sent ? { onAllowOnce: () => respond(true), onDeny: () => respond(false) } : {})} />
+    <details className="text-xs"><summary>Exact request</summary><pre className="whitespace-pre-wrap break-all">{JSON.stringify(args,null,2)}</pre></details>
+    {error ? <p role="alert" className="text-xs text-red-600">{error}</p> : null}
+  </div>;
+}
+
 function AskQuestion({ args, approval, respondToApproval, result, status }: Props<AskArgs, AskResult>) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -392,6 +429,10 @@ function Present({ args, status, result, isError }: Props) {
   );
 }
 
+function WorkspaceScreen({ args, result, status }: Props<{ action?: string }, { ok?: boolean; detail?: string }>) {
+  return <ToolRow label="Workspace" activeLabel="With you in the workspace" query={args.action ?? "look"} request={`Preston · ${args.action ?? "look"}`} result={result?.detail ?? "Waiting for the active browser."} status={status} isError={result?.ok === false} />;
+}
+
 /**
  * Chat renderers for the eve agent's tools. Schemas and executors live in `agent/tools/`;
  * every entry here is render-only (`type: "backend"`). `standalone` entries sit in the reply
@@ -412,8 +453,10 @@ export const toolkit = defineToolkit({
   hosted_game_status: { type: "backend", display: "standalone", render: HostedGame },
   list_policy_versions: { type: "backend", render: Revisions },
   league_standing: { type: "backend", render: LeagueStanding },
+  research_authority: { type: "backend", display: "standalone", render: ResearchAuthority },
   enter_league: { type: "backend", display: "standalone", render: EnterLeague },
   ask_question: { type: "backend", display: "standalone", render: AskQuestion },
   request_details: { type: "backend", display: "standalone", render: RequestDetails },
+  workspace_screen: { type: "backend", render: WorkspaceScreen },
   present: { type: "backend", display: "standalone", render: Present },
 });

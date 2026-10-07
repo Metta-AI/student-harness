@@ -8,6 +8,7 @@ const sessionSchema = z.object({
   token: z.string().min(1),
   subjectId: z.string().min(1),
   email: z.email(),
+  name: z.string().nullable().optional(),
 });
 
 export type Session = z.infer<typeof sessionSchema>;

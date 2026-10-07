@@ -1,24 +1,28 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
-import { setStudentReasoningEffort, studentReasoningEffort } from "../../../lib/db";
-import { reasoningEfforts } from "../../../lib/reasoning";
+import { preferencesPatchSchema } from "../../../lib/preferences";
+import { saveUserPreferences, userPreferences } from "../../../lib/preferences-store";
 import { currentSession, sameOrigin } from "../../../lib/session";
 import { trackServer } from "../../../lib/analytics-server";
 import { events } from "../../../lib/analytics-events";
 
-/** The student's chat preferences. Today that is how much the agent reasons before acting. */
+const headers = { "Cache-Control": "private, no-store" };
 export async function GET() {
   const session = await currentSession();
-  if (!session) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
-  return NextResponse.json({ reasoningEffort: await studentReasoningEffort(session.subjectId) });
+  if (!session) return Response.json({ error: "Sign in first" }, { status: 401, headers });
+  try { return Response.json(await userPreferences(session.subjectId), { headers }); }
+  catch { return Response.json({ error: "Couldn’t load your settings. Try again." }, { status: 503, headers }); }
 }
 
 export async function POST(request: Request) {
-  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
+  if (!sameOrigin(request)) return Response.json({ error: "Invalid origin" }, { status: 403, headers });
   const session = await currentSession();
-  if (!session) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
-  const body = z.object({ reasoningEffort: z.enum(reasoningEfforts) }).parse(await request.json());
-  await setStudentReasoningEffort(session.subjectId, body.reasoningEffort);
-  await trackServer(session.subjectId, events.reasoningEffortChanged, { effort: body.reasoningEffort }, { reasoning_effort: body.reasoningEffort });
-  return NextResponse.json({ reasoningEffort: body.reasoningEffort });
+  if (!session) return Response.json({ error: "Sign in first" }, { status: 401, headers });
+  const parsed = preferencesPatchSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: "Check your settings and try again." }, { status: 400, headers });
+  try {
+    const saved = await saveUserPreferences(session.subjectId, parsed.data);
+    if (parsed.data.reasoningEffort) {
+      await trackServer(session.subjectId, events.reasoningEffortChanged, { effort: saved.reasoningEffort }, { reasoning_effort: saved.reasoningEffort }).catch(() => {});
+    }
+    return Response.json(saved, { headers });
+  } catch { return Response.json({ error: "Couldn’t save your settings. Your changes are still here to retry." }, { status: 503, headers }); }
 }

@@ -1,8 +1,8 @@
 # Student policy workspace
 
 This directory is the student's Gods of the Arena workspace for the
-[NeuralHub at Diablo Valley College league](https://softmax.com/gods-of-the-arena/neuralhub)
-(`league_080e6abb-597b-45e3-ab21-63321905fdd6`). It is rebuilt from the
+[default Gods of the Arena league](https://softmax.com/observatory/v2?tab=coworlds&detail=league%3Aleague_3c60897b-25cf-4b37-9d1a-8554c1198f28)
+(`league_3c60897b-25cf-4b37-9d1a-8554c1198f28`). It is rebuilt from the
 student's saved history whenever a new chat session opens its sandbox.
 
 - `hero.bas` — the working copy of the policy. Edit this file.

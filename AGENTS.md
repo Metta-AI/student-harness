@@ -1,12 +1,15 @@
-# NeuralHub student policy project
+# Softmax policy project
 
 This repo is for one Gods of the Arena BASIC policy: `hero.bas`. Keep policy changes in that file.
 The web app under `app/`, `components/`, `lib/`, and the eve coach under `agent/` are the hosted harness around it;
 see `README.md` for how the coach, its sandbox, and Supabase fit together.
 
-# Target only the [NeuralHub at Diablo Valley College league](https://softmax.com/gods-of-the-arena/neuralhub)
-(`league_080e6abb-597b-45e3-ab21-63321905fdd6`). Read the [policy and host guide](https://softmax.com/gods-of-the-arena/wiki/policy-and-host-surface),
+# GoTA policy development targets the [default Gods of the Arena league](https://softmax.com/observatory/v2?tab=coworlds&detail=league%3Aleague_3c60897b-25cf-4b37-9d1a-8554c1198f28)
+(`league_3c60897b-25cf-4b37-9d1a-8554c1198f28`). Read the [policy and host guide](https://softmax.com/gods-of-the-arena/wiki/policy-and-host-surface),
 the [game rules](https://softmax.com/gods-of-the-arena/wiki/overview), and `league.json` before editing.
+The site also supports browsing other Softmax games and leagues through the live catalog.
+Keep selected-league standings, rounds, voice context, and saved views isolated by league ID.
+GoTA policy editing and hosted research remain attached to the default league above until a game-specific adapter is added.
 The source was copied from
 [`base.bas`](https://github.com/Metta-AI/polyworld/blob/main/examples/gods_of_the_arena/players/base.bas).
 The live game can change, so check its wiki and source before relying on old host functions.

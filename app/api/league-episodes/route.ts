@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { policyVersionBySoftmaxId } from "../../../lib/db";
+import { leaguePolicyAccess } from "../../../lib/league-policy-access";
 import { summarizeLeagueEpisode } from "../../../lib/league-episodes";
 import { currentSession } from "../../../lib/session";
 import { getEpisodeResults, leagueRoundNumbers, listPolicyVersionEpisodeRequests } from "../../../lib/softmax";
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     policyVersionId: z.string().regex(/^[0-9a-f-]{36}$/),
     cursor: z.string().min(1).optional(),
   }).parse(Object.fromEntries(new URL(request.url).searchParams));
-  const version = await policyVersionBySoftmaxId(session.subjectId, policyVersionId);
+  const version = await leaguePolicyAccess(session.subjectId, session.token, policyVersionId);
   if (!version) return NextResponse.json({ error: "That policy version is not one of your uploads" }, { status: 404 });
   const page = await listPolicyVersionEpisodeRequests(session.token, policyVersionId, cursor);
   const inRound = page.entries.filter((entry) => entry.round_id);
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   const results = new Map((await getEpisodeResults(session.token, league.map((entry) => entry.id))).map((result) => [result.id, result]));
   return NextResponse.json({
     policyVersionId,
-    revision: version.revision_number,
+    revision: version.revision,
     nextCursor: page.next_cursor,
     episodes: league.map((entry) => {
       const result = results.get(entry.id);

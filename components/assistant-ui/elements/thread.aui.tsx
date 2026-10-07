@@ -23,11 +23,13 @@ import {
 } from "@/components/assistant-ui/elements/tool-group.aui";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
+import { SelectField } from "@/components/ui/select-field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ReferenceChip, longPasteLength, parseAttachments, parseReference, parseSuggestions, stripAgentBlocks, studentText, useChatThread } from "@/components/chat-context";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { track } from "@/lib/analytics";
 import { events } from "@/lib/analytics-events";
+import {chatModels,modelLabels,isChatModel} from "@/lib/model-selection";
 import { reasoningEfforts, reasoningLabels, isReasoningEffort } from "@/lib/reasoning";
 import { cn } from "@/lib/utils";
 import {
@@ -433,7 +435,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
         >
           <ComposerAttachments />
           <ComposerPrimitive.Input
-            placeholder="Describe a strategy, or say what to change in hero.bas"
+            placeholder="Ask Preston, or share an idea…"
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/85 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-sm leading-6 outline-none"
             rows={1}
             autoFocus={autoFocus}
@@ -455,29 +457,30 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   );
 };
 
-/** Reasoning effort for the agent's next model calls. A native select keeps it keyboard and screen-reader friendly. */
+/** Reasoning effort for the agent's next model calls. */
 const ReasoningSelect: FC = () => {
-  const { reasoningEffort, onReasoningEffort } = useChatThread();
+  const { reasoningEffort, onReasoningEffort, modelSettingsSaving } = useChatThread();
   return (
     <label
       title={reasoningLabels[reasoningEffort].detail}
       className="text-muted-foreground hover:text-foreground focus-within:ring-ring flex h-7 items-center gap-1 rounded-md ps-1.5 text-xs transition-colors focus-within:ring-2"
     >
-      <span>Reasoning</span>
-      <select
+
+      <SelectField
+        disabled={modelSettingsSaving}
         value={reasoningEffort}
-        onChange={(event) => { if (isReasoningEffort(event.target.value)) onReasoningEffort(event.target.value); }}
+        onValueChange={(value) => { if (isReasoningEffort(value)) onReasoningEffort(value); }}
         aria-label="Reasoning effort"
-        className="text-foreground h-7 cursor-pointer rounded-md bg-transparent pe-1 text-xs font-medium outline-none"
-      >
-        {reasoningEfforts.map((effort) => (
-          <option key={effort} value={effort}>
-            {reasoningLabels[effort].label}
-          </option>
-        ))}
-      </select>
+        className="text-foreground h-7 gap-1 border-0 bg-transparent px-1 font-medium shadow-none data-[size=sm]:h-7"
+        options={reasoningEfforts.map((effort) => ({ value: effort, label: reasoningLabels[effort].label }))}
+      />
     </label>
   );
+};
+
+const ModelSelect: FC = () => {
+ const {chatModel,onChatModel,modelSettingsSaving}=useChatThread();
+ return <SelectField aria-label="Model" disabled={modelSettingsSaving} value={chatModel} onValueChange={value=>{if(isChatModel(value))onChatModel(value);}} options={chatModels.map(model=>({value:model,label:modelLabels[model]}))} className="h-7 max-w-32 gap-1 border-0 bg-transparent px-1 text-xs font-medium shadow-none"/>;
 };
 
 const ComposerAction: FC = () => {
@@ -493,6 +496,7 @@ const ComposerAction: FC = () => {
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
       <div className="flex min-w-0 items-center gap-1.5">
         <ComposerAddAttachment />
+        <ModelSelect />
         <ReasoningSelect />
       </div>
       <div className="flex items-center gap-1.5">

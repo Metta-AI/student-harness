@@ -1,0 +1,65 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {artifactView} from '../lib/campaigns/artifact-view.ts';
+const row={id:'evidence',kind:'replay-evidence',content:{episodeId:'episode',audit:{status:'completed',result:{vm:{subject:2},engines:{replayBinarySha256:'digest'},events:{damage:[1,2]},simulation:{subject:2,ticks:300,winner:0,heroes:[{slot:2,xp:500}],samples:[{tick:100,heroes:[{slot:2,xp:100},{slot:3,xp:99}]},{tick:200,heroes:[{slot:2,xp:200},{slot:3,xp:199}]}],milestones:[{tick:150,kind:'xp_gain'}],item_actions:[{tick:125,kind:'use_item_at'}]}}}}};
+test('probe source and exact edits remain available without bloating default evidence reads',()=>{
+ const probe={id:'probe',kind:'candidate-probe',content:{source:'print worldTick\noriginal',candidateHash:'hash',baselineVersionId:'version',proposal:{summary:'Trace only',components:[{id:'trace',before:'original',after:'print worldTick\noriginal'}]},diagnostic:{status:'completed',result:{probe:{validated_hashes:100}}}}};
+ const original=structuredClone(probe),summary=artifactView(probe);
+ assert.equal(summary.content.source,undefined);assert.equal(summary.content.proposal,undefined);assert.equal(summary.content.sourceAvailable,true);
+ assert.equal(summary.content.proposalSummary,'Trace only');assert.deepEqual(summary.content.componentIds,['trace']);
+ assert.deepEqual(summary.content.diagnostic,probe.content.diagnostic);assert.equal(summary.content.candidateHash,'hash');
+ assert.equal(artifactView(probe,{view:'full'}),probe);assert.deepEqual(probe,original);
+ assert.equal(artifactView({kind:'candidate-probe',content:{candidateHash:'old'}}).content.sourceAvailable,false);
+});
+test('compact evidence preserves identity and results without copying bulky timelines',()=>{
+ const original=structuredClone(row),r=artifactView(row);
+ assert.equal(r.id,'evidence');assert.equal(r.content.audit.result.engines.replayBinarySha256,'digest');
+ assert.equal(r.content.audit.result.simulation.winner,0);assert.equal(r.content.audit.result.simulation.samples,undefined);
+ assert.equal(r.content.audit.result.simulation.sample_count,2);assert.deepEqual(r.content.audit.result.instrumentNames,['damage']);
+ assert.equal(artifactView(row,{view:'full'}),row);assert.deepEqual(row,original);
+ const claim={id:'claim',content:{claim:'A hypothesis'}};assert.equal(artifactView(claim),claim);
+});
+test('timeline selects total ticks and actor without misattributing another subject ledger',()=>{
+ const s=artifactView(row,{view:'timeline',slot:2,tickStart:100,tickEnd:175}).content.audit.result.simulation;
+ assert.deepEqual(s.samples,[{tick:100,heroes:[{slot:2,xp:100}]}]);assert.equal(s.item_actions[0].tick,125);assert.equal(s.truncated,false);
+ const other=artifactView(row,{view:'timeline',slot:3}).content.audit.result.simulation;
+ assert.equal(other.samples[0].heroes[0].slot,3);assert.deepEqual(other.item_actions,[]);assert.deepEqual(other.milestones,[]);
+ const many=structuredClone(row);many.content.audit.result.simulation.item_actions=Array.from({length:250},(_,tick)=>({tick}));
+ const bounded=artifactView(many,{view:'timeline'}).content.audit.result.simulation;
+ assert.equal(bounded.item_actions.length,200);assert.equal(bounded.matchedCounts.item_actions,250);assert.equal(bounded.truncated,true);
+});
+test('objective events stay bounded and time-filtered without being attributed to the selected hero',()=>{
+ const enriched=structuredClone(row),s=enriched.content.audit.result.simulation;
+ s.objective_events=[{tick:110,id:41,kind:'first_damage',team:1},{tick:190,id:41,kind:'destroyed',team:1}];
+ s.objective_event_count=2;s.objectives=[{id:41,kind:'Tower',hp:0}];s.samples[0].objectives=[{id:41,kind:'Tower',hp:400}];
+ const summary=artifactView(enriched).content.audit.result.simulation;
+ assert.equal(summary.objective_events,undefined);assert.equal(summary.objective_event_count,2);
+ assert.equal(summary.timelineAvailability.objective_events,true);assert.deepEqual(summary.objectives,s.objectives);
+ const timeline=artifactView(enriched,{view:'timeline',slot:3,tickStart:100,tickEnd:175}).content.audit.result.simulation;
+ assert.deepEqual(timeline.objective_events,[s.objective_events[0]]);assert.deepEqual(timeline.item_actions,[]);
+ assert.deepEqual(timeline.samples[0].objectives,s.samples[0].objectives);
+ assert.equal(artifactView(row).content.audit.result.simulation.timelineAvailability.objective_events,false);
+ s.objective_events=Array.from({length:250},(_,tick)=>({tick}));s.objective_event_count=250;
+ const bounded=artifactView(enriched,{view:'timeline'}).content.audit.result.simulation;
+ assert.equal(bounded.objective_events.length,200);assert.equal(bounded.matchedCounts.objective_events,250);assert.equal(bounded.truncated,true);
+});
+test('engine effect timelines retain attribution and scope XP and portal ledgers to their decoder subject',()=>{
+ const enriched=structuredClone(row),s=enriched.content.audit.result.simulation;
+ s.objective_effects=[{tick:120,kind:'Damage',actor:{player:3},target:{id:41},amount:70},{tick:220,kind:'Death',actor:{player:4},target:{id:41}}];
+ s.subject_events=[{tick:120,kind:'XpGained',actor:{id:41},target:{player:2},amount:200},{tick:180,kind:'PortalCompleted',actor:{player:2}}];
+ s.objective_effect_count=2;s.subject_event_count=2;s.xp_reconciliation={initial:0,awarded:500,final:500,matched:true};
+ const summary=artifactView(enriched).content.audit.result.simulation;
+ assert.equal(summary.objective_effects,undefined);assert.equal(summary.subject_events,undefined);
+ assert.deepEqual(summary.xp_reconciliation,s.xp_reconciliation);assert.equal(summary.timelineAvailability.subject_events,true);
+ const own=artifactView(enriched,{view:'timeline',slot:2,tickStart:100,tickEnd:175}).content.audit.result.simulation;
+ assert.deepEqual(own.subject_events,[s.subject_events[0]]);assert.deepEqual(own.objective_effects,[s.objective_effects[0]]);
+ assert.equal(own.objective_effects[0].actor.player,3);
+ const other=artifactView(enriched,{view:'timeline',slot:3}).content.audit.result.simulation;
+ assert.deepEqual(other.subject_events,[]);assert.equal(other.matchedCounts.subject_events,0);
+ assert.deepEqual(other.objective_effects,s.objective_effects);
+ s.objective_effects=Array.from({length:250},(_,tick)=>({tick}));s.objective_effect_count=250;
+ const bounded=artifactView(enriched,{view:'timeline'}).content.audit.result.simulation;
+ assert.equal(bounded.objective_effects.length,200);assert.equal(bounded.matchedCounts.objective_effects,250);assert.equal(bounded.truncated,true);
+ assert.equal(artifactView(row).content.audit.result.simulation.timelineAvailability.subject_events,false);
+ assert.equal(artifactView(enriched,{view:'full'}),enriched);
+});

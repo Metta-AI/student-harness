@@ -1,0 +1,60 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {execFileSync} from 'node:child_process';
+const url=process.env.TASK_TEST_DATABASE_URL;
+test('research execution: authority fences calls/games, branches preserve active policy and history ownership',{skip:!url},()=>{
+ const body=`begin;
+ insert into students(subject_id,email,sealed_token) values('execution-test','x@test','unused');
+ insert into policy_versions(id,student_id,revision_number,revision_id,summary,source,ir,receipts) values('c0000000-0000-0000-0000-000000000001','execution-test',1,'branch-base','baseline','base','{}','{}');
+ do $$ declare c research_cycles;p uuid;t uuid;candidate uuid;e uuid;begin
+ c:=research_create_cycle('execution-test','cycle-exec','Test retreat timing','Observe retreat changes','c0000000-0000-0000-0000-000000000001');
+ perform research_grant('execution-test',c.id,48,2,now()+interval '1 day',true,5,'grant');
+ p:=research_propose('execution-test',c.id,'p1','First candidate change','Inspect retreat behavior','Tests our shared question','[]',24,10,'preston');
+ t:=research_start_plan('execution-test',p);
+ perform task_claim(t,'execution-test',0,'exec','session');
+ if not task_reserve_call(t,0,'call1') then raise exception 'call denied';end if;
+ perform research_control('execution-test',c.id,'pause','pause');
+ if task_reserve_call(t,0,'call2') then raise exception 'paused call allowed';end if;
+ begin perform task_reserve_game(t,'exec');raise exception 'paused game allowed';exception when others then if sqlerrm<>'Cycle authority paused or expired' then raise;end if;end;
+ perform research_control('execution-test',c.id,'resume','resume');perform research_resume_tasks();
+ perform task_claim(t,'execution-test',2,'exec2','session2');
+ candidate:=task_save_policy(t,'exec2','{"revisionId":"candidate1","source":"candidate","ir":{"update":{"revision":2,"parent":"branch-base"}},"receipts":{}}','candidate');
+ update agent_tasks set status='completed' where id=t;
+ perform task_record_usage(t,'call1',0.07);perform task_record_usage(t,'call1',0.07);
+ if (select count(*) from research_events where cycle_id=c.id and kind='cost.reported')<>1 then raise exception 'late cost receipt duplicated';end if;
+ if (select reported_cost_usd from agent_tasks where id=t)<>0.07 then raise exception 'late cost not attributed';end if;
+ if (select active_version_id from research_cycles where id=c.id)<>c.baseline_id then raise exception 'candidate auto promoted';end if;
+ p:=research_propose('execution-test',c.id,'p2','Second candidate change','Inspect retreat behavior','Tests another explanation','[]',24,9,'preston');
+ t:=research_start_plan('execution-test',p);perform task_claim(t,'execution-test',0,'exec3','session3');
+ candidate:=task_save_policy(t,'exec3','{"revisionId":"candidate2","source":"candidate2","ir":{"update":{"revision":3,"parent":"branch-base"}},"receipts":{}}','second candidate');
+ if (select parent_revision_id from policy_versions where id=candidate)<>'branch-base' then raise exception 'wrong branch parent';end if;
+ e:=research_append('execution-test',c.id,'human','human','position','{"text":"My view"}');
+ begin perform research_append('execution-test',c.id,'erase','preston','position','{}','[]',e);raise exception 'agent erased human position';exception when others then if sqlerrm<>'Only the author may supersede a statement' then raise;end if;end;
+ update research_cycles set expires_at=now()-interval '1 second' where id=c.id;
+ begin perform task_reserve_game(t,'exec3');raise exception 'expired game allowed';exception when others then if sqlerrm<>'Cycle authority paused or expired' then raise;end if;end;
+ if task_reserve_call(t,0,'expired-call') then raise exception 'expired call allowed';end if;
+ perform research_control('execution-test',c.id,'close','close');perform research_resume_tasks();
+ if (select status from agent_tasks where id=t)<>'canceled' then raise exception 'closed task still active';end if;
+ if (select calls_allocated from research_cycles where id=c.id)<>1 then raise exception 'closed cycle did not release unused allowance';end if;
+ end $$;rollback;`;
+ assert.doesNotThrow(()=>execFileSync('psql',[url,'-X','-q','-v','ON_ERROR_STOP=1'],{input:body,encoding:'utf8'}));
+});
+
+test('research baseline: reserve unchanged-version evaluation without creating a candidate',{skip:!url},()=>{
+ const body=`begin;
+ insert into students(subject_id,email,sealed_token) values('baseline-test','base@test','unused');
+ insert into policy_versions(id,student_id,revision_number,revision_id,summary,source,ir,receipts) values('c1000000-0000-0000-0000-000000000001','baseline-test',1,'original-baseline','baseline','base','{}','{}');
+ do $$ declare c research_cycles;p uuid;t uuid;begin
+ c:=research_create_cycle('baseline-test','cycle-base','Observe initial behavior','Inspect retreat timing','c1000000-0000-0000-0000-000000000001');
+ perform research_grant('baseline-test',c.id,24,1,now()+interval '1 day',true,5,'grant');
+ p:=research_propose('baseline-test',c.id,'baseline-plan','Test the unchanged active policy','Inspect retreat behavior','Establish comparable baseline evidence','[]',6,100,'preston','baseline');
+ t:=research_start_plan('baseline-test',p);
+ if (select phase from agent_tasks where id=t)<>'upload' then raise exception 'baseline entered mutation workflow';end if;
+ if (select checkpoint->>'version_id' from agent_tasks where id=t)<>c.active_version_id::text then raise exception 'wrong baseline';end if;
+ if (select count(*) from policy_versions where student_id='baseline-test')<>1 then raise exception 'created candidate for baseline';end if;
+ perform task_claim(t,'baseline-test',0,'base-exec','base-session');
+ perform task_reserve_game(t,'base-exec');perform task_reserve_game(t,'base-exec');
+ if (select games_requested from agent_tasks where id=t)<>1 then raise exception 'duplicate baseline game';end if;
+ end $$;rollback;`;
+ assert.doesNotThrow(()=>execFileSync('psql',[url,'-X','-q','-v','ON_ERROR_STOP=1'],{input:body,encoding:'utf8'}));
+});

@@ -210,12 +210,14 @@ export async function listChatSessions(studentId: string, host: string): Promise
   return z.array(chatRow).parse(rows);
 }
 
-export async function upsertChatSession(input: { studentId: string; sessionId: string; title?: string; host: string }): Promise<ChatSessionRow> {
+export async function upsertChatSession(input: { studentId: string; sessionId: string; title?: string; host: string; opponent?: {policyId: string; leagueId: string} }): Promise<ChatSessionRow> {
   const existing = await db().from("chat_sessions").select("*").eq("session_id", input.sessionId).maybeSingle();
   if (existing.error) throw new Error(`load chat: ${existing.error.message}`);
   if (existing.data && existing.data.student_id !== input.studentId) throw new Error("This chat belongs to another student");
   const row = must(await db().from("chat_sessions").upsert({
     session_id: input.sessionId, student_id: input.studentId, host: input.host,
+    opponent_policy_id: input.opponent?.policyId ?? existing.data?.opponent_policy_id ?? null,
+    opponent_league_id: input.opponent?.leagueId ?? existing.data?.opponent_league_id ?? null,
     title: input.title ?? existing.data?.title ?? null, updated_at: new Date().toISOString(),
   }, { onConflict: "session_id" }).select("*").single(), "upsert chat");
   return chatRow.parse(row);

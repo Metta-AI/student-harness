@@ -1,0 +1,51 @@
+/* Expandable opponent notebooks inside the league roster. */
+.opponents-table .opponent-summary-row { cursor: pointer; transition: background .15s ease; }
+.opponents-table .opponent-summary-row:hover { background: #f0f3e7; }
+.opponents-table .opponent-summary-row.is-expanded { background: #eaf0df; }
+.opponents-table .opponent-summary-row.is-expanded > td { border-bottom-color: #dce5d0; }
+.opponent-row-toggle { display: inline-flex; align-items: center; gap: 8px; text-align: left; border: 0; background: transparent; color: #36563d; font-size: 12px; font-weight: 650; padding: 4px 0; }
+.opponent-row-toggle svg { flex: 0 0 auto; }
+.opponent-row-toggle:focus-visible { outline: 2px solid #648352; outline-offset: 4px; border-radius: 3px; }
+.opponent-row-toggle:hover span { text-decoration: underline; text-underline-offset: 3px; }
+.opponents-table .opponent-row-policy { padding-left: 24px; }
+.opponent-row-research { display: flex; align-items: flex-start; flex-direction: column; gap: 8px; }
+.opponent-analysis-badge { display: inline-flex; align-items: center; gap: 5px; width: max-content; background: #e0eacd; color: #466338; border-radius: 5px; padding: 4px 7px; font-size: 10px; font-weight: 550; }
+.opponent-research-status { font-size: 11px; color: #728064; }
+.opponents-table .opponent-analysis-row[hidden] { display: none; }
+.opponents-table .opponent-analysis-row > td { padding: 0; background: #f7f9f0; border-bottom: 1px solid #d7e0c9; }
+.opponent-inline-analysis { margin: 0 14px 18px; padding: 20px 24px; border: 1px solid #dce5d0; border-top: 0; border-radius: 0 0 12px 12px; background: #fcfdf7; white-space: normal; overflow-wrap: anywhere; }
+.opponent-inline-analysis > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+.opponent-analysis-eyebrow { font-size: 9px; letter-spacing: .13em; color: #7a8d6b; font-weight: 650; }
+.opponent-inline-analysis h3 { font-size: 18px; font-weight: 550; color: #37573e; margin: 6px 0; letter-spacing: -.02em; }
+.opponent-inline-analysis > header p { margin: 0; color: #748365; font-size: 11px; }
+.opponent-inline-analysis > header > button { flex-shrink: 0; color: #587449; }
+.opponent-analysis-summary { padding: 16px 18px; background: #edf3e3; border-left: 3px solid #91ab72; border-radius: 0 8px 8px 0; }
+.opponent-analysis-summary > p { margin: 8px 0 12px; font-size: 14px; line-height: 1.75; color: #3f5538; white-space: pre-wrap; }
+.opponent-analysis-summary > details > summary { font-size: 11px; }
+.opponents-table .opponent-analysis-summary > details p { font-size: 12px; line-height: 1.7; }
+.opponent-inline-analysis h4 { margin: 18px 0 10px; font-size: 12px; font-weight: 600; color: #53694a; }
+.opponent-inline-notes > h4 > span { margin-left: 5px; color: #80936c; font-size: 11px; }
+.opponent-inline-notes article { padding: 12px 0; border-bottom: 1px solid #e5eadc; }
+.opponent-inline-notes article:last-of-type { border-bottom: 0; }
+.opponents-table .opponent-inline-analysis small { font-size: 10px; color: #718064; margin-top: 0; line-height: 1.6; }
+.opponent-note-kind { display: inline-block; text-transform: capitalize; padding: 2px 6px; border-radius: 4px; background: #e8eedf; color: #47683a; }
+.opponent-note-kind.hypothesis { background: #f1ead4; color: #85702e; }
+.opponent-inline-notes article > p { font-size: 13px; line-height: 1.75; white-space: pre-wrap; margin: 8px 0; color: #40503a; }
+.opponent-note-links { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.opponent-note-links a { color: #63794d; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+.opponent-analysis-empty { display: flex; align-items: flex-start; gap: 12px; padding: 16px; background: #f1f4e9; border-radius: 8px; color: #7a8d65; }
+.opponent-analysis-empty > svg { flex-shrink: 0; }
+.opponent-analysis-empty strong { color: #506b42; font-size: 13px; font-weight: 550; }
+.opponent-analysis-empty p { font-size: 12px; line-height: 1.7; margin: 6px 0 0; color: #718064; }
+.opponent-analysis-error, .opponent-analysis-loading { font-size: 12px; line-height: 1.7; color: #728064; }
+.opponent-analysis-error { color: #9b623f; }
+.opponent-inline-sessions { border-top: 1px solid #e5eadc; margin-top: 16px; }
+.opponent-inline-sessions > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.opponent-inline-sessions > div > button { text-align: left; }
+.opponent-inline-sessions > div > span { flex-shrink: 0; color: #81916f; font-size: 10px; }
+@media (max-width: 650px) {
+  .opponent-inline-analysis { width: calc(100vw - 48px); max-width: 100%; padding: 16px; margin: 0 8px 12px; }
+  .opponent-inline-analysis > header { align-items: flex-start; flex-wrap: wrap; }
+  .opponent-analysis-summary { padding: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .opponents-table .opponent-summary-row { transition: none; } }

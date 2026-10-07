@@ -9,7 +9,17 @@ import { SoftmaxError, whoami } from "../../../lib/softmax";
 
 export async function GET() {
   const session = await currentSession();
-  return NextResponse.json(session ? { email: session.email, subjectId: session.subjectId } : { email: null });
+  if (!session) return NextResponse.json({ email: null });
+  // Refresh older cookies once so existing users get their account name without signing in again.
+  if (session.name === undefined) {
+    // Display-name enrichment must not hold up a valid local session.
+    const identity = await whoami(session.token, AbortSignal.timeout(1500)).catch(() => null);
+    if (identity?.subject_id === session.subjectId) {
+      const name = identity.name ?? null;
+      return setSessionCookie({ email: session.email, subjectId: session.subjectId, name }, { ...session, name });
+    }
+  }
+  return NextResponse.json({ email: session.email, subjectId: session.subjectId, name: session.name ?? null });
 }
 
 export async function POST(request: Request) {
@@ -30,10 +40,11 @@ export async function POST(request: Request) {
   await resolveStudentPlayer(identity.subject_id, token, { refresh: true }).catch(() => null);
   await identifyServer(identity.subject_id, { email: identity.user_email, name: identity.name ?? undefined });
   await trackServer(identity.subject_id, events.signedIn, { source: "server" });
-  return setSessionCookie({ email: identity.user_email, subjectId: identity.subject_id }, {
+  return setSessionCookie({ email: identity.user_email, subjectId: identity.subject_id, name: identity.name ?? null }, {
     token,
     subjectId: identity.subject_id,
     email: identity.user_email,
+    name: identity.name ?? null,
   });
 }
 

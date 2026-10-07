@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { currentSession, sameOrigin } from "../../../lib/session";
-import { policyVersionBySoftmaxId } from "../../../lib/db";
+import { leaguePolicyAccess } from "../../../lib/league-policy-access";
 import { createReplaySession, getEpisodeRequest, getExperience, replaySessionReady } from "../../../lib/softmax";
 
 // A hosted practice game is addressed by the student's own run. A league-round episode has no run, so
@@ -17,11 +17,11 @@ export async function POST(request: Request) {
   if (!session) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
   const input = requestSchema.parse(await request.json());
   if ("policyVersionId" in input) {
-    if (!(await policyVersionBySoftmaxId(session.subjectId, input.policyVersionId))) return NextResponse.json({ error: "That policy version is not one of your uploads" }, { status: 403 });
+    if (!(await leaguePolicyAccess(session.subjectId, session.token, input.policyVersionId))) return NextResponse.json({ error: "This policy is not in your Softmax league workspace" }, { status: 403 });
     const episode = await getEpisodeRequest(session.token, input.episodeId);
     if (!episode.round_id || !episode.policy_version_ids.includes(input.policyVersionId)) return NextResponse.json({ error: "Your policy did not play in this league episode" }, { status: 403 });
     if (!episode.replay_url || !episode.coworld_id) return NextResponse.json({ error: "Replay unavailable" }, { status: 404 });
-    return NextResponse.json(await createReplaySession(session.token, episode.coworld_id, episode.replay_url));
+    return NextResponse.json({ ...await createReplaySession(session.token, episode.coworld_id, episode.replay_url), episode_id: episode.episode_id });
   }
   const { runId, episodeId } = input;
   const run = await getExperience(session.token, runId);

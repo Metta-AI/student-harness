@@ -14,7 +14,7 @@ export type ChatReference = {
   coachingSessionId?: string;
   policyVersionId?: string;
 };
-export type AnalysisRequest = { id: number; text: string; context?: Record<string, string>; reference?: ChatReference };
+export type AnalysisRequest = { id: number; text: string; title?: string; sessionId?: string; opponent?: {policyId: string; leagueId: string}; context?: Record<string, string>; reference?: ChatReference };
 export type StarterPrompt = { label: string; text: string; detail: string };
 export type SuggestionOrigin = "coach" | "fallback" | "starter_cta";
 
@@ -113,6 +113,9 @@ export type ChatThreadValue = {
   /** Send a prepared prompt as the student. */
   sendPrompt: (text: string, origin: SuggestionOrigin) => void;
   /** How much the agent reasons before acting; saved per student and applied from the next model call. */
+  chatModel: import("../lib/model-selection").ChatModel;
+  onChatModel: (model: import("../lib/model-selection").ChatModel) => void;
+  modelSettingsSaving: boolean;
   reasoningEffort: ReasoningEffort;
   onReasoningEffort: (effort: ReasoningEffort) => void;
   /** The Softmax player the student's uploads and league entries are credited to, when known. */

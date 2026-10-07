@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PolicyRevision } from "../lib/semantic-ir";
 import { BasicCode } from "./basic-code";
 
-export function SemanticPolicy({ revision }: { revision: PolicyRevision }) {
+export function SemanticPolicy({ revision, selectedRuleId }: { revision: PolicyRevision; selectedRuleId?: string }) {
   const { ir } = revision;
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(selectedRuleId ?? "");
+  useEffect(() => { if (selectedRuleId) setSelectedId(selectedRuleId); }, [selectedRuleId]);
   const selected = ir.strategy.find((rule) => rule.id === selectedId) ?? ir.strategy.at(-1);
   const span = selected?.source.status === "mapped" ? selected.source : undefined;
   const lineNumber = (offset: number) => revision.source.slice(0, offset).split("\n").length;
@@ -22,7 +23,7 @@ export function SemanticPolicy({ revision }: { revision: PolicyRevision }) {
         <details><summary>Goal <small>{Object.keys(ir.goal).length} goals</small></summary>{Object.entries(ir.goal).map(([id, goal]) => <p key={id}><b>{id}</b> · {goal.claim}</p>)}</details>
         <details><summary>Skill <small>{Object.keys(ir.skill).length} actions</small></summary>{Object.entries(ir.skill).map(([id, skill]) => <p key={id}><b>{id}</b> · {skill.intent}</p>)}</details>
         <div className="strategy-list"><div className="strategy-title">Strategy <small>{ir.strategy.length} source links</small></div>
-          {ir.strategy.map((rule) => <button type="button" key={rule.id} className={`strategy-rule${selected?.id === rule.id ? " active" : ""}`} onClick={() => setSelectedId(rule.id)}>
+          {ir.strategy.map((rule) => <button data-present-action="click" type="button" key={rule.id} className={`strategy-rule${selected?.id === rule.id ? " active" : ""}`} onClick={() => setSelectedId(rule.id)}>
             <span><b>{rule.id.replace(/^R_/, "").replaceAll("_", " ")}</b><small>{rule.source.status === "mapped" ? `L${lineNumber(rule.source.start)}–${lineNumber(Math.max(rule.source.start, rule.source.end - 1))}` : "Changed since mapping"}</small></span>
             <span>{rule.intent}</span>
           </button>)}</div>

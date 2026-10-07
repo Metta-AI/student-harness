@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import { withEve } from "eve/next";
 
 const config: NextConfig = {
-  outputFileTracingIncludes: { "/*": ["./hero.bas"] },
+  outputFileTracingIncludes: { "/*": ["./hero.bas", "./workers/**/*.py", "./workers/native/*.nim"] },
   async rewrites() {
     return {
       // Serve Softmax's static replay viewer first-party so browsers that block third-party

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { semanticChangeSchema, type SemanticChange } from "./semantic-change.ts";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const canonicalJson = (value: unknown): string => JSON.stringify(value, (_key, item) =>
@@ -25,12 +26,7 @@ export type SemanticIR = z.infer<typeof semanticIrSchema>;
 export type SourceSpan = z.infer<typeof spanSchema>;
 export type PolicyRevision = { source: string; ir: SemanticIR; revisionId: string; receipts: { representation: "partial"; fidelity: "not_run"; validity: "not_run"; performance: "not_run"; notes: string[] } };
 
-export const semanticChangeSchema = z.object({
-  before: z.string().min(8), after: z.string().min(8), summary: z.string().min(8).max(200),
-  semantic: z.object({ condition: z.string().min(8), action: z.string().min(8), goal: z.string().min(8),
-    hypothesis: z.string().min(8), expected: z.string().min(8), non_trigger: z.string().min(8) }),
-});
-export type SemanticChange = z.infer<typeof semanticChangeSchema>;
+export { semanticChangeSchema, type SemanticChange } from "./semantic-change.ts";
 
 function revision(source: string, ir: SemanticIR): PolicyRevision {
   semanticIrSchema.parse(ir);
@@ -182,4 +178,10 @@ export function baselineRevision(parent: PolicyRevision, summary: string, semant
   ir.update = { revision: n, parent: parent.revisionId, change: summary, evidence,
     research_plan: { hypothesis: semantic.hypothesis, expected: semantic.expected, non_trigger: semantic.non_trigger } };
   return revision(parent.source, ir);
+}
+
+/** Preserve the actual parent while assigning the next workspace-wide revision number to a branch. */
+export function numberCandidate(candidate: PolicyRevision, nextNumber: number): PolicyRevision {
+  if (!Number.isInteger(nextNumber) || nextNumber < candidate.ir.update.revision) throw new Error("Candidate revision number must not move backward");
+  return revision(candidate.source, { ...candidate.ir, update: { ...candidate.ir.update, revision: nextNumber } });
 }

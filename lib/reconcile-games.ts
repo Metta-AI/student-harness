@@ -1,7 +1,7 @@
 import { experimentByXp, insertExperiment, listExperiments, listOpenExperiments, listPolicyVersions, updateExperiment, type ExperimentRow, type EpisodeSummary } from "./db";
 import { trackServer } from "./analytics-server";
 import { events } from "./analytics-events";
-import { getEpisodeStats, getExperience, requestEpisode } from "./softmax";
+import { getEpisodeStats, getExperience, hostedGameRequestKey, requestEpisode } from "./softmax";
 
 const terminal = new Set(["completed", "failed", "canceled", "cancelled"]);
 
@@ -49,7 +49,7 @@ export async function retryCanceledBaseline(studentId: string, token: string, ex
   const games = await listExperiments(studentId, baseline.id);
   if (games.some((game) => game.title.startsWith("Baseline retry") || (game.xp_request_id !== experiment.xp_request_id && game.status === "completed"))) return null;
   const title = "Baseline retry: starter policy";
-  const experience = await requestEpisode(token, baseline.softmax_policy_version_id, title, `neuralhub-baseline-retry-${baseline.softmax_policy_version_id}`);
+  const experience = await requestEpisode(token, baseline.softmax_policy_version_id, title, hostedGameRequestKey(baseline.softmax_policy_version_id, "baseline-retry"));
   const row = await insertExperiment({ studentId, policyVersionRowId: baseline.id, xpRequestId: experience.id, title, status: experience.status });
   await trackServer(studentId, events.hostedGameRequested, { revision: 1, source: "automatic_retry", xp_request_id: row.xp_request_id });
   return row;

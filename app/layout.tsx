@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Softmax IDE Beta",
-  description: "Build, upload, and play a Gods of the Arena policy with the Neural Viking Agent",
+  title: "Softmax · Preston",
+  description: "Develop game policies with Preston. Test ideas, review replays, and improve together.",
 };
 
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -7,7 +7,7 @@ import { getCompetitionDivision, getPolicyLeaderboard, listLeagueSubmissions } f
 import { requireStudentToken } from "../lib/student";
 
 export default defineTool({
-  description: "Compare all saved revisions with separate hosted self-play and live NeuralHub league evidence. Includes actual submission status even when a submitted revision has no leaderboard games. Rank league revisions by league score, never by hosted score or win rate alone. League wins are destroyed forts; time-limit games score 0 and are reported separately, never as wins.",
+  description: "Compare all saved revisions with separate hosted self-play and live GoTA league evidence. Includes actual submission status even when a submitted revision has no leaderboard games. Rank league revisions by league score, never by hosted score or win rate alone. League wins are destroyed forts; time-limit games score 0 and are reported separately, never as wins.",
   inputSchema: z.object({}),
   label: { start: () => "List saved revisions" },
   async execute(_input, ctx) {
@@ -38,14 +38,14 @@ export default defineTool({
           league_submission: submission ? { id: submission.id, status: submission.status, created_at: submission.created_at } : null,
           league_result_72h: standing ? (() => {
             const record = records.get(standing.policy_version_id);
-            return { rank: standing.rank, score: standing.score, games: record?.games ?? standing.episodes_played, ...(record ? { wins: record.wins, losses: record.losses, time_limits: record.time_limits } : {}) };
+            return { score: standing.score, games: record?.games ?? standing.episodes_played, ...(record ? { wins: record.wins, losses: record.losses, time_limits: record.time_limits } : {}) };
           })() : null,
         };
       });
     return {
       revisions,
       best_league_revision_72h: bestLeagueRevision(revisions),
-      league_ranking_metric: "score",
+      league_ranking_metric: "72h policy mean score; not official player MMR rank",
       note: versions.length ? undefined : "No saved revisions yet; the working copy is the official starter policy.",
     };
   },

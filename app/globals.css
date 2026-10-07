@@ -5,6 +5,8 @@
 @layer theme, base, legacy, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "./styles.css" layer(legacy);
+@import "./performance.css" layer(legacy);
+@import "./opponents.css" layer(legacy);
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 @import "tw-shimmer";
@@ -123,13 +125,13 @@
 }
 
 /*
-  Tailwind's preflight, scoped. The chat thread and the popovers and dialogs it portals to <body>
-  get the reset the components were written against; everything else keeps the browser defaults
+  Tailwind's preflight, scoped. The chat thread, the popovers and dialogs it portals to <body>, and the shadcn
+  form controls used across the workspace get the reset the components were written against; everything else keeps the browser defaults
   the workspace stylesheet was written against.
 */
 @layer base {
-  :where(.aui-scope, [data-radix-popper-content-wrapper], [data-slot^="dialog"], [data-slot^="tooltip"]),
-  :where(.aui-scope, [data-radix-popper-content-wrapper], [data-slot^="dialog"], [data-slot^="tooltip"]) :where(*, ::before, ::after) {
+  :where(.aui-scope, [data-radix-popper-content-wrapper], [data-slot^="dialog"], [data-slot^="tooltip"], [data-slot^="select"], [data-slot^="checkbox"], [data-slot^="switch"], [data-slot="input"], [data-slot="textarea"]),
+  :where(.aui-scope, [data-radix-popper-content-wrapper], [data-slot^="dialog"], [data-slot^="tooltip"], [data-slot^="select"], [data-slot^="checkbox"], [data-slot^="switch"], [data-slot="input"], [data-slot="textarea"]) :where(*, ::before, ::after) {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
@@ -137,7 +139,7 @@
     border-color: var(--border);
     outline-color: color-mix(in oklab, var(--ring) 60%, transparent);
   }
-  :where(.aui-scope, [data-radix-popper-content-wrapper], [data-slot^="dialog"], [data-slot^="tooltip"]) {
+  :where(.aui-scope, [data-radix-popper-content-wrapper], [data-slot^="dialog"], [data-slot^="tooltip"], [data-slot^="select"], [data-slot^="checkbox"], [data-slot^="switch"], [data-slot="input"], [data-slot="textarea"]) {
     font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;

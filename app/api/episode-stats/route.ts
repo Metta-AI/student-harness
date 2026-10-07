@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { currentSession } from "../../../lib/session";
-import { policyVersionBySoftmaxId } from "../../../lib/db";
+import { leaguePolicyAccess } from "../../../lib/league-policy-access";
 import { getEpisodeRequest, getEpisodeStats, getExperience } from "../../../lib/softmax";
 
 export async function GET(request: Request) {
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   }).parse(Object.fromEntries(new URL(request.url).searchParams));
   if (!runId) {
     // League-round episode: allowed when one of the student's uploaded versions played in it.
-    if (!policyVersionId || !(await policyVersionBySoftmaxId(session.subjectId, policyVersionId))) return NextResponse.json({ error: "That policy version is not one of your uploads" }, { status: 403 });
+    if (!policyVersionId || !(await leaguePolicyAccess(session.subjectId, session.token, policyVersionId))) return NextResponse.json({ error: "This policy is not in your Softmax league workspace" }, { status: 403 });
     const leagueEpisode = await getEpisodeRequest(session.token, episodeId);
     if (!leagueEpisode.round_id || !leagueEpisode.policy_version_ids.includes(policyVersionId)) return NextResponse.json({ error: "Your policy did not play in this league episode" }, { status: 403 });
     if (leagueEpisode.status !== "completed") return NextResponse.json({ error: "Episode is still running" }, { status: 409 });

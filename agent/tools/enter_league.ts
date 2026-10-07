@@ -8,7 +8,7 @@ import { submitPolicy } from "../../lib/softmax";
 import { requireStudentToken } from "../lib/student";
 
 export default defineTool({
-  description: "Submit an uploaded revision to the live NeuralHub at Diablo Valley College league. Only when the student explicitly asks to enter the league. The student approves the submission in the chat before it runs.",
+  description: "Submit an uploaded revision to the live configured Gods of the Arena league. Only when the student explicitly asks to enter the league. The student approves the submission in the chat before it runs.",
   inputSchema: z.object({ revision: z.number().int().positive().optional().describe("Saved revision number. Omit for the latest uploaded revision.") }),
   approval: always(),
   label: { start: ({ revision }) => `Enter the league with revision ${revision ?? "latest"}` },

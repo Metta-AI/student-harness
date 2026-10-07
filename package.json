@@ -3,15 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/*.test.mjs",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --experimental-test-module-mocks --test tests/*.test.mjs",
     "test:semantic": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/semantic-ir.test.mjs tests/policy-metrics.test.mjs",
     "eve:dev": "eve dev",
     "eve:info": "eve info",
-    "db:migrate": "psql \"$POSTGRES_URL_NON_POOLING\" -v ON_ERROR_STOP=1 -f supabase/migrations/0001_workspace.sql -f supabase/migrations/0002_workspace_files.sql -f supabase/migrations/0003_experiments_any_run.sql -f supabase/migrations/0004_chat_host.sql -f supabase/migrations/0005_policy_name.sql -f supabase/migrations/0006_reasoning_effort.sql -f supabase/migrations/0007_policy_player.sql"
+    "db:migrate": "node scripts/migrate-db.mjs",
+    "test:browser": "node tests/browser/research.mjs",
+    "research:dev": "node scripts/research-dev-scheduler.mjs",
+    "research:status": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/campaign-status.mjs"
   },
   "repository": {
     "type": "git",
@@ -32,6 +35,7 @@
     "@assistant-ui/react-streamdown": "^0.3.17",
     "@streamdown/code": "^1.1.1",
     "@supabase/supabase-js": "^2.117.2",
+    "@vercel/sandbox": "3.5.1",
     "ai": "^7.0.123",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
@@ -59,6 +63,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "just-bash": "^3.4.2",
+    "playwright": "^1.63.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2"
   },

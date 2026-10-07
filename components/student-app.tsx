@@ -1,16 +1,40 @@
 "use client";
+import {SessionRail} from "./tasks/session-rail";
+import {BackgroundButton} from "./tasks/background-button";
+import { selectPerformancePolicy, type LeagueEntry } from "../lib/league-policy-selection";
+import type { LeagueStanding } from "../lib/softmax";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
 import type { PolicyRevision } from "../lib/semantic-ir";
 import { episodeScore, policyScore } from "../lib/policy-metrics";
 import type { LeagueEpisodeSummary } from "../lib/league-episodes";
-import { SemanticPolicy } from "./semantic-policy";
+import { PresentPanel } from "./partner/present-card";
+import { Together } from "./partner/together";
+import { CompanionProvider, useCompanion } from "./partner/companion";
+import type { ClaimInput } from "../lib/partner/model";
+import { TaskPanel } from "./tasks/task-panel";
+import { useTaskFeed } from "./tasks/use-task-feed";
+import { GamePicker } from "./partner/game-navigation";
+import { AccountMenu } from "./partner/account-menu";
+import { GameStatus } from "./partner/game-status";
+import { Opponents } from "./workspace/opponents";
+import { ExperimentDetail } from "./workspace/experiment-detail";
+import { ExperimentTable } from "./workspace/experiment-table";
+import { StrategyOverview } from "./workspace/strategy-overview";
+import { PerformanceEvidence } from "./workspace/performance-evidence";
+import { PerformanceOverview } from "./workspace/performance-overview";
+import { PresentationPane } from "./workspace/presentation-pane";
+import { workspaceTabs, viewSchema, presentationRoute, type WorkspaceTab, type WorkspaceView } from "../lib/workspace/presentation";
+import { PolicyWiki } from "./workspace/policy-wiki";
+import type { WikiPage } from "../lib/workspace/policy-wiki";
 import { ReplayCoaching } from "./replay-coaching";
 import { Chat, type AnalysisRequest, type ChatReference, type StarterPrompt } from "./chat";
 import { ReplayFrame } from "./replay-frame";
 import { identifyStudent, resetAnalytics, track } from "../lib/analytics";
 import { events } from "../lib/analytics-events";
+import { Input } from "@/components/ui/input";
+import { SelectField } from "@/components/ui/select-field";
+import { Textarea } from "@/components/ui/textarea";
 
 type WorkspaceVersion = {
   id: string; revision: number; summary: string; created_at: string;
@@ -48,9 +72,9 @@ type LeaguePolicy = {
   rank: number; policy_version_id: string; policy_label: string; score: number;
   // The leaderboard also reports wins and a win rate, but it counts a tie for first as a win, which
   // turns every time-limit game into a win. Wins are counted from the episodes instead (LeagueRecord).
-  episodes_played: number; rounds_played: number;
+  episodes_played: number; rounds_played: number; player_id: string | null;
 };
-type PolicyStats = { division: string; windowHours: number; policies: LeaguePolicy[]; entered: string[] };
+type PolicyStats = { standings: LeagueStanding[]; checkedAt: string; entries: LeagueEntry[]; currentPolicyId?: string | null; division: string; windowHours: number; policies: LeaguePolicy[]; entered: string[] };
 /** One league-round episode from the selected policy version's point of view. */
 type LeagueEpisode = LeagueEpisodeSummary & {
   id: string; status: string; created_at: string; replay_url: string | null; error: string | null;
@@ -72,18 +96,38 @@ function leagueRoster(episode: LeagueEpisode) {
   return `Against: ${names(episode.opponents) || "nobody"}${episode.teammates.length ? `. Same side: ${names(episode.teammates)}` : ""}`;
 }
 type MatchStats = { steps: number | null; game_stats: Record<string, number>; policy_stats: { position: number; policy_name: string | null; avg_reward: number; avg_metrics: Record<string, number> }[] };
-type ReplaySnapshot = { id: string; games: number; windowStart: string; windowEnd: string; record: { wins: number; losses: number; draws: number }; values: Record<string, number> };
-type SortKey = "episode" | "policy" | "played" | "score";
+type SortKey = "episode" | "development" | "played" | "score";
 const tableColumns: { key: SortKey; label: string }[] = [
-  { key: "episode", label: "Episode" }, { key: "policy", label: "Policy" },
+  { key: "episode", label: "Episode" }, { key: "development", label: "Policy" },
   { key: "played", label: "Played" }, { key: "score", label: "Score" },
 ];
 function episodePolicyId(episode: ArenaEpisode) {
   return episode.scores.length === 1 ? episode.scores[0].policy_version_id : null;
 }
 
-export function StudentApp({ league }: { league: League }) {
+export function StudentApp({ league, initialTaskId }: { league: League; initialTaskId?: string }) {
+  return <CompanionProvider><StudentWorkspace league={league} initialTaskId={initialTaskId} /></CompanionProvider>;
+}
+
+function StudentWorkspace({ league, initialTaskId }: { league: League; initialTaskId?: string }) {
+  const companion = useCompanion();
   const [email, setEmail] = useState<string | null | undefined>(undefined);
+  const [sessionError, setSessionError] = useState(false);
+  const [sessionAttempt, setSessionAttempt] = useState(0);
+  const [preferredName, setPreferredName] = useState("");
+  const [accountName, setAccountName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!email) { setPreferredName(""); return; }
+    let active = true;
+    const load = () => { void fetch("/api/preferences", { cache: "no-store" }).then(response => response.ok ? response.json() : null).then(value => { if (active && typeof value?.preferredName === "string") setPreferredName(value.preferredName); }).catch(() => {}); };
+    load(); window.addEventListener("focus", load);
+    return () => { active = false; window.removeEventListener("focus", load); };
+  }, [email]);
+  const taskFeed = useTaskFeed(!!email);
+  const [opponentPolicyId,setOpponentPolicyId]=useState<string|undefined>();
+  const [selectedExperiment,setSelectedExperiment]=useState<string|null>(null);
+  const [selectedWork, setSelectedWork] = useState<string | null>(initialTaskId??null);
+  const [creatingWork, setCreatingWork] = useState(false);
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -98,14 +142,17 @@ export function StudentApp({ league }: { league: League }) {
   const [submission, setSubmission] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [starterRevision, setStarterRevision] = useState<PolicyRevision | null>(null);
-  const [activeTab, setActiveTab] = useState<"episodes" | "policy">("episodes");
+  const [activeTab, selectTab] = useState<WorkspaceTab>(initialTaskId?"experiments":"performance");
+  const setActiveTab = useCallback((tab: WorkspaceTab) => { companion.presentation.manual(); if(window.location.pathname.startsWith("/sessions/"))window.history.pushState(null,"",`/?view=${tab}`); selectTab(tab); }, [companion.presentation.manual]);
+  const [branchId, setBranchId] = useState<string | undefined>();
+  const [cycleId, setCycleId] = useState<string | undefined>();
+  const [outcomeLast, setOutcomeLast] = useState<10 | 25 | 50>(10);
+  const [opponentFilter, setOpponentFilter] = useState("");
   const [arena, setArena] = useState<ArenaData | null>(null);
   const [arenaError, setArenaError] = useState("");
   const [episodes, setEpisodes] = useState<ArenaEpisode[]>([]);
   const [policyStats, setPolicyStats] = useState<PolicyStats | null>(null);
   const [policyStatsError, setPolicyStatsError] = useState("");
-  const [replaySnapshot, setReplaySnapshot] = useState<ReplaySnapshot | null>(null);
-  const [snapshotError, setSnapshotError] = useState("");
   const [selectedPolicyId, setSelectedPolicyId] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({ key: "played", direction: "desc" });
   const [coaching, setCoaching] = useState<CoachingSession[]>([]);
@@ -117,10 +164,11 @@ export function StudentApp({ league }: { league: League }) {
   const [matchView, setMatchView] = useState<"league" | "practice" | null>(null);
   const [leagueFeed, setLeagueFeed] = useState<LeagueFeed | null>(null);
   const [leagueRecord, setLeagueRecord] = useState<LeagueRecord | null>(null);
+  const [leagueRecordError, setLeagueRecordError] = useState("");
   const [leagueLoading, setLeagueLoading] = useState(false);
   const [leagueError, setLeagueError] = useState("");
   const [leagueSelection, setLeagueSelection] = useState<{ id: string; policyVersionId: string; label: string } | null>(null);
-  const [viewer, setViewer] = useState<{ url: string; ready: boolean } | null>(null);
+  const [viewer, setViewer] = useState<{ url: string; ready: boolean; episodeId?: string | null } | null>(null);
   const [replayError, setReplayError] = useState("");
   const [replayNote, setReplayNote] = useState("");
   const [matchStats, setMatchStats] = useState<MatchStats | null>(null);
@@ -128,26 +176,37 @@ export function StudentApp({ league }: { league: League }) {
   const [analysisRequest, setAnalysisRequest] = useState<AnalysisRequest | null>(null);
   const [recordingCoaching, setRecordingCoaching] = useState(false);
   const replayPanelRef = useRef<HTMLElement>(null);
-  // Chat / workspace split: remembered per browser, stacked instead of split on narrow screens.
-  const splitKey = "softmax-ide-split";
-  const [splitLayout] = useState<Layout | undefined>(() => {
-    if (typeof window === "undefined") return undefined;
-    try { const raw = window.localStorage.getItem(splitKey); return raw ? (JSON.parse(raw) as Layout) : undefined; } catch { return undefined; }
-  });
-  const [narrow, setNarrow] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [presentBusy, setPresentBusy] = useState(false);
+  const [presentActivity, setPresentActivity] = useState<string | null>(null);
+  const updatePresence = useCallback((busy: boolean, activity: string | null) => {
+    setPresentBusy(busy); setPresentActivity(activity);
+  }, []);
+  const [presentExpanded, setPresentExpanded] = useState(false);
+  const [compactScreen, setCompactScreen] = useState(false);
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 800px)");
-    const update = () => setNarrow(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
+    const media = window.matchMedia("(max-width: 800px)");
+    const change = () => setCompactScreen(media.matches);
+    change(); media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
   }, []);
-  const rememberSplit = useCallback((layout: Layout, meta?: { isUserInteraction?: boolean }) => {
-    try { window.localStorage.setItem(splitKey, JSON.stringify(layout)); } catch { /* storage unavailable */ }
-    if (meta?.isUserInteraction) track(events.splitResized, { chat_percent: Math.round(layout.chat ?? 0) });
+  const closePresent = useCallback(() => {
+    setPresentExpanded(false); setChatOpen(false);
+    requestAnimationFrame(() => document.getElementById("present-panel-toggle")?.focus());
   }, []);
+  const openTextChat = useCallback(() => setChatOpen(true), []);
+  const chatDock = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (analysisRequest) setChatOpen(true); }, [analysisRequest]);
+  useEffect(() => {
+    if (!chatOpen) return;
+    const timer = window.setTimeout(() => chatDock.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(), 100);
+    const onKey = (event: KeyboardEvent) => { if (compactScreen && event.key === "Escape" && !event.defaultPrevented) closePresent(); };
+    window.addEventListener("keydown", onKey);
+    return () => { window.clearTimeout(timer); window.removeEventListener("keydown", onKey); };
+  }, [chatOpen, compactScreen, closePresent]);
   const [focusCoachingId, setFocusCoachingId] = useState<string | undefined>(undefined);
   const openReference = useCallback((reference: ChatReference) => {
+    if (window.matchMedia("(max-width: 800px)").matches) { setChatOpen(false); setPresentExpanded(false); }
     setActiveTab("episodes");
     setViewer(null);
     if (reference.kind === "league-episode" && reference.policyVersionId) {
@@ -188,11 +247,35 @@ export function StudentApp({ league }: { league: League }) {
     setWorkspaceKey((key) => key + 1);
     if (kind === "turn") setRefreshKey((key) => key + 1);
   }, []);
-  const onChatNotice = useCallback((title: string, detail: string) => setToast({ id: `chat:${Date.now()}`, title, detail, at: new Date().toISOString(), kind: "error" }), []);
+  const onChatNotice = useCallback((title: string, detail: string) => { setChatOpen(true); setToast({ id: `chat:${Date.now()}`, title, detail, at: new Date().toISOString(), kind: "error" }); }, []);
 
   useEffect(() => {
-    fetch("/api/session").then((response) => response.json()).then((data) => { setEmail(data.email); if (data.email && data.subjectId) { setSubjectId(data.subjectId); identifyStudent(data.subjectId, data.email); } });
-    fetch("/api/starter-policy").then((response) => response.json()).then(setStarterRevision);
+    const controller = new AbortController();
+    let active = true;
+    setSessionError(false);
+    const timer = window.setTimeout(() => controller.abort(), 8000);
+    void (async () => {
+      try {
+        const response = await fetch("/api/session", { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("Session lookup failed");
+        const data = await response.json();
+        if (!data || !(data.email === null || (typeof data.email === "string" && data.email && typeof data.subjectId === "string" && data.subjectId))) throw new Error("Invalid session response");
+        if (!active) return;
+        setEmail(data.email);
+        setAccountName(data.name ?? null);
+        if (data.email) { setSubjectId(data.subjectId); identifyStudent(data.subjectId, data.email); }
+      } catch {
+        // Keep the existing cookie: a network failure does not mean the user signed out.
+        if (active) setSessionError(true);
+      } finally { window.clearTimeout(timer); }
+    })();
+    return () => { active = false; window.clearTimeout(timer); controller.abort(); };
+  }, [sessionAttempt]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/starter-policy", {signal: controller.signal}).then(response => response.ok ? response.json() : null).then(data => {if(data && !controller.signal.aborted)setStarterRevision(data);}).catch(() => {});
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -250,55 +333,80 @@ export function StudentApp({ league }: { league: League }) {
 
   useEffect(() => {
     if (!email) return;
-    const refresh = () => fetch("/api/workspace").then(async (response) => {
+    const controller = new AbortController();
+    let busy = false;
+    const refresh = () => {
+      if (busy || controller.signal.aborted || document.visibilityState === "hidden") return;
+      busy = true;
+      void fetch("/api/workspace", {signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)])}).then(async (response) => {
       const data = await response.json();
+      if(controller.signal.aborted)return;
       if (response.ok) setWorkspace(data);
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(() => { busy = false; });
+    };
     refresh();
     const timer = window.setInterval(refresh, 8000);
-    return () => window.clearInterval(timer);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {controller.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh);};
   }, [email, refreshKey, workspaceKey]);
 
   useEffect(() => {
     if (!email) return;
-    const refresh = () => fetch("/api/arena").then(async (response) => {
+    const controller = new AbortController();
+    let busy = false;
+    const refresh = () => {
+      if (busy || controller.signal.aborted || document.visibilityState === "hidden") return;
+      busy = true;
+      void fetch("/api/arena", {signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)])}).then(async (response) => {
       const data = await response.json();
+      if(controller.signal.aborted)return;
       if (!response.ok) throw new Error(data.error ?? "Could not load episodes");
       setArena(data);
       setEpisodes(data.episodes);
       setArenaError("");
-    }).catch((cause: Error) => setArenaError(cause.message));
+    }).catch((cause: Error) => {if(!controller.signal.aborted)setArenaError(cause.message);}).finally(() => { busy = false; });
+    };
     refresh();
     const timer = window.setInterval(refresh, 30000);
-    return () => window.clearInterval(timer);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {controller.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh);};
   }, [email, refreshKey]);
 
   useEffect(() => {
     if (!email) return;
-    const refresh = () => fetch("/api/coaching").then(async (response) => {
+    const controller = new AbortController();
+    let busy = false;
+    const refresh = () => {
+      if (busy || controller.signal.aborted || document.visibilityState === "hidden") return;
+      busy = true;
+      void fetch("/api/coaching", {signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)])}).then(async (response) => {
       const data = await response.json();
+      if(controller.signal.aborted)return;
       if (!response.ok) throw new Error(data.error ?? "Could not load coaching");
       setCoaching(data.sessions);
       setCoachingAvailable(data.available);
       setCoachingError("");
       setCoachingLoaded(true);
-    }).catch((cause: Error) => { setCoachingError(cause.message); setCoachingLoaded(true); });
+    }).catch((cause: Error) => { if(!controller.signal.aborted){setCoachingError(cause.message); setCoachingLoaded(true);} }).finally(() => { busy = false; });
+    };
     refresh();
     const timer = window.setInterval(refresh, 30000);
-    return () => window.clearInterval(timer);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {controller.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh);};
   }, [email, refreshKey]);
 
   useEffect(() => {
     if (!email) return;
-    const refresh = () => fetch("/api/policy-stats").then(async (response) => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const refresh = () => fetch("/api/policy-stats", {signal:AbortSignal.any([controller.signal,AbortSignal.timeout(25000)])}).then(async (response) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not load league policy results");
-      setPolicyStats(data);
-      setPolicyStatsError("");
-    }).catch((cause: Error) => setPolicyStatsError(cause.message));
+      if (!cancelled) { setPolicyStats(data); setPolicyStatsError(""); }
+    }).catch((cause: Error) => { if (!cancelled) setPolicyStatsError(cause.message); });
     refresh();
     const timer = window.setInterval(refresh, 60000);
-    return () => window.clearInterval(timer);
+    return () => { cancelled = true; controller.abort(); window.clearInterval(timer); };
   }, [email, refreshKey]);
 
   useEffect(() => {
@@ -319,49 +427,51 @@ export function StudentApp({ league }: { league: League }) {
   const pendingExperiments = workspace?.experiments.filter((experiment) => !["completed", "failed", "canceled", "cancelled"].includes(experiment.status)) ?? [];
   const latestGames = workspace?.experiments.filter((game) => game.revision === workspace.latest?.ir.update.revision) ?? [];
   const resumePolicy = workspace?.draft ? { label: "Finish draft", text: workspace.draft.conflict ? "Merge my older draft/conflicting-hero.bas into the latest saved hero.bas without losing newer changes. Then save, upload, and request one hosted game." : "Finish saving my unsaved hero.bas draft, then upload it and request a hosted game. Check git diff first so you preserve my edit." }
-    : workspace?.latest && !latestSavedUpload ? { label: "Upload + play", text: `Revision r${workspace.latest.ir.update.revision} is saved but not uploaded. Upload that revision without editing or resaving, then request one hosted game in the NeuralHub league.` }
-    : workspace?.latest && !latestGames.some((game) => game.status === "completed" || !["failed", "canceled", "cancelled"].includes(game.status)) ? { label: latestGames.length ? "Retry hosted game" : "Play hosted game", text: `Use my latest saved revision r${workspace.latest.ir.update.revision}. Upload it if needed and request one hosted game in the NeuralHub league. Do not edit or resave the policy.` } : null;
+    : workspace?.latest && !latestSavedUpload ? { label: "Upload + play", text: `Revision r${workspace.latest.ir.update.revision} is saved but not uploaded. Upload that revision without editing or resaving, then request one hosted game in the ${league.name} league (${league.id}).` }
+    : workspace?.latest && !latestGames.some((game) => game.status === "completed" || !["failed", "canceled", "cancelled"].includes(game.status)) ? { label: latestGames.length ? "Retry hosted game" : "Play hosted game", text: `Use my latest saved revision r${workspace.latest.ir.update.revision}. Upload it if needed and request one hosted game in the ${league.name} league (${league.id}). Do not edit or resave the policy.` } : null;
   const starterPrompt: StarterPrompt | null = workspace && workspace.versions.length === 0 ? {
     label: "Create and upload my starter policy",
     detail: "The official starter hero.bas already plays a full match. Save it as revision 1, upload it to Softmax, and play one hosted game so every later change has a baseline to beat.",
     text: "Create my first policy: save the official starter hero.bas as revision 1 without changes, upload it to Softmax, and run one baseline hosted game so I have something to compare against. Then propose the first change I could try.",
   } : null;
-  const chatSuggestions = (() => {
-    const versions = workspace?.versions ?? [];
-    if (pendingExperiments.length) return ["Check the running hosted game", "Plan the next change to hero.bas while we wait", "Which part of hero.bas decides when my hero retreats?"];
-    if (!versions.length) return ["Create and upload my starter policy", "Make my hero retreat earlier when its health is low", "Explain what the starter policy does in a team fight"];
-    if (!currentUpload) return ["Upload the latest revision and play one hosted game", "Show me what the latest revision changed in hero.bas", "Change one thing: prioritize towers over kills"];
-    return ["What do the latest hosted results say about my policy?", "Suggest one testable change to hero.bas", "Compare my revisions and keep the best one"];
-  })();
+
 
   const boardByPolicy = new Map(policyStats?.policies.map((policy) => [policy.policy_version_id, policy]));
   const policyIds = [...new Set(episodes.flatMap((episode) => episode.scores.map((score) => score.policy_version_id)))];
   const uploadedVersions = [...(workspace?.versions ?? [])].reverse().filter((version): version is WorkspaceVersion & { policyVersionId: string } => !!version.policyVersionId);
   const versionByPolicy = new Map(uploadedVersions.map((version) => [version.policyVersionId, version]));
   const entered = new Set(policyStats?.entered ?? []);
-  // The newest revision entered in the league is what this page is about unless the student picks another.
+  // Current remote champion drives Performance; local revisions remain editable independently.
   const leagueEntry = uploadedVersions.find((version) => entered.has(version.policyVersionId)) ?? null;
-  const activePolicyId = selectedPolicyId || leagueEntry?.policyVersionId || latestUpload?.policyVersionId || policyIds[0] || "";
+  const currentLeaguePolicyId = policyStats?.currentPolicyId ?? policyStats?.entered[0] ?? "";
+  const activePolicyId = selectPerformancePolicy(selectedPolicyId, currentLeaguePolicyId, !!policyStats, latestUpload?.policyVersionId || policyIds[0] || "");
   const activeVersion = versionByPolicy.get(activePolicyId) ?? null;
   const policyLabel = (id: string) => {
     const version = versionByPolicy.get(id);
-    if (version) return `r${version.revision} · ${version.label ?? id.slice(0, 8)}`;
-    return boardByPolicy.get(id)?.policy_label ?? `Policy ${id.slice(0, 8)}`;
+    const entry = policyStats?.entries.find(e=>e.policyVersionId===id);
+    const remoteLabel = entry?.policyLabel ?? boardByPolicy.get(id)?.policy_label;
+    if (version) return `r${version.revision} · ${remoteLabel ?? version.label ?? id.slice(0, 8)}`;
+    return remoteLabel ?? `Policy ${id.slice(0, 8)}`;
   };
-  const activePlayer = activeVersion?.player ?? defaultPlayer;
-  const leaguePolicyId = activeVersion?.policyVersionId ?? "";
+  // Shared by the performance and episodes pickers: the league entry or latest upload first, then every known version.
+  const policyVersionOptions = [{ value: "", label: `${currentLeaguePolicyId ? "Current league policy" : "Latest upload"} · all practice games` },
+    ...[...new Set([...uploadedVersions.map((version) => version.policyVersionId), ...entered, ...(policyStats?.entries.map(e=>e.policyVersionId)??[]), ...policyIds])].map((id) => ({ value: id, label: `${policyLabel(id)}${entered.has(id) ? " · current" : policyStats?.entries.find(e=>e.policyVersionId===id)?.status==="benched" ? " · benched" : ""}` }))];
+  const activePlayer = policyStats?.entries.find(e=>e.policyVersionId===activePolicyId)?.playerName ?? activeVersion?.player ?? defaultPlayer;
+  const leaguePolicyId = activePolicyId;
   useEffect(() => {
-    if (!email || !leaguePolicyId) { setLeagueFeed(null); setLeagueRecord(null); return; }
+    if (!email || !leaguePolicyId) { setLeagueFeed(null); setLeagueRecord(null); setLeagueRecordError(""); return; }
     let cancelled = false;
     setLeagueFeed((feed) => (feed?.policyVersionId === leaguePolicyId ? feed : null));
     setLeagueRecord((record) => (record?.policyVersionId === leaguePolicyId ? record : null));
+    setLeagueRecordError("");
     setLeagueError("");
-    const refreshRecord = () => fetch(`/api/league-record?policyVersionId=${leaguePolicyId}`).then(async (response) => {
+    const controller = new AbortController();
+    const refreshRecord = () => fetch(`/api/league-record?policyVersionId=${leaguePolicyId}`, {signal:AbortSignal.any([controller.signal,AbortSignal.timeout(45000)])}).then(async (response) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not load the league record");
-      if (!cancelled) setLeagueRecord(data);
-    }).catch((cause: Error) => { if (!cancelled) setLeagueError(cause.message); });
-    const refreshEpisodes = () => fetch(`/api/league-episodes?policyVersionId=${leaguePolicyId}`).then(async (response) => {
+      if (!cancelled) { setLeagueRecord(data); setLeagueRecordError(""); }
+    }).catch((cause: Error) => { if (!cancelled) setLeagueRecordError(cause.message); });
+    const refreshEpisodes = () => fetch(`/api/league-episodes?policyVersionId=${leaguePolicyId}`, {signal:AbortSignal.any([controller.signal,AbortSignal.timeout(30000)])}).then(async (response) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not load league episodes");
       if (cancelled) return;
@@ -378,7 +488,7 @@ export function StudentApp({ league }: { league: League }) {
     const refresh = () => { void refreshEpisodes(); void refreshRecord(); };
     refresh();
     const timer = window.setInterval(refresh, 60000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    return () => { cancelled = true; controller.abort(); window.clearInterval(timer); };
   }, [email, leaguePolicyId, refreshKey]);
   function loadMoreLeague() {
     if (!leagueFeed?.nextCursor || leagueLoading) return;
@@ -404,39 +514,23 @@ export function StudentApp({ league }: { league: League }) {
   const view = matchView ?? (leagueReady && !leagueRows.length && episodes.length ? "practice" : "league");
   const selectedLeagueEpisode = leagueSelection ? leagueRows.find((episode) => episode.id === leagueSelection.id) : undefined;
   function openLeagueEpisode(episode: LeagueEpisode) {
-    if (!leaguePolicyId) return;
+    if (!leaguePolicyId || recordingCoaching) return;
+    setActiveTab("episodes"); setMatchView("league");
     setSelectedEpisodeId("");
     setLeagueSelection({ id: episode.id, policyVersionId: leaguePolicyId, label: `League round #${episode.round.number} · ${episode.side ?? "both sides"} vs ${leagueAgainst(episode)}` });
     setViewer(null); setReplayError(""); setReplayNote("");
     track(events.replayOpened, { episode_id: episode.id, status: episode.status, source: "league-table", league: true });
     window.setTimeout(() => replayPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
   }
-  useEffect(() => {
-    if (!email || !activePolicyId) return;
-    let cancelled = false;
-    setReplaySnapshot(null);
-    setSnapshotError("");
-    fetch(`/api/replay-snapshot?policyId=${encodeURIComponent(activePolicyId)}`)
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? "Could not load the replay snapshot");
-        return data;
-      })
-      .then((data) => { if (!cancelled) setReplaySnapshot(data.snapshot ?? null); })
-      .catch((cause: Error) => { if (!cancelled) setSnapshotError(cause.message); });
-    return () => { cancelled = true; };
-  }, [email, activePolicyId]);
-  const activeStanding = boardByPolicy.get(activePolicyId);
-  const activeEpisodes = episodes.filter((episode) => episode.scores.some((score) => score.policy_version_id === activePolicyId));
-  const activeScores = activeEpisodes.map((episode) => policyScore(episode, activePolicyId)).filter((score): score is number => score !== null);
-  const hostedMean = activeScores.length ? activeScores.reduce((total, score) => total + score, 0) / activeScores.length : null;
-  const latestActiveEpisode = activeEpisodes.find((episode) => episode.status === "completed");
+  const activePlayerId = boardByPolicy.get(activePolicyId)?.player_id ?? policyStats?.entries?.find(e=>e.policyVersionId===activePolicyId)?.playerId;
+  const activeStanding = policyStats?.standings?.find(p=>p.player_id===activePlayerId);
+  const ownPlayerIds = [...new Set([...(policyStats?.entries?.map(e=>e.playerId) ?? []), ...uploadedVersions.map(v=>boardByPolicy.get(v.policyVersionId)?.player_id)].filter((id):id is string=>!!id))];
   const visibleEpisodes = episodes.filter((episode) => !selectedPolicyId || episode.scores.some((score) => score.policy_version_id === selectedPolicyId));
   const sortedEpisodes = [...visibleEpisodes].sort((a, b) => {
     const value = (episode: ArenaEpisode): string | number | null => {
       const policyId = episodePolicyId(episode);
       if (sort.key === "episode") return (episode.job_index ?? 0) + 1;
-      if (sort.key === "policy") return selectedPolicyId ? boardByPolicy.get(selectedPolicyId)?.policy_label ?? selectedPolicyId : policyId ? boardByPolicy.get(policyId)?.policy_label ?? policyId : "Mixed";
+      if (sort.key === "development") return selectedPolicyId ? boardByPolicy.get(selectedPolicyId)?.policy_label ?? selectedPolicyId : policyId ? boardByPolicy.get(policyId)?.policy_label ?? policyId : "Mixed";
       if (sort.key === "played") return new Date(episode.completed_at ?? episode.created_at).getTime();
       if (sort.key === "score") return selectedPolicyId ? policyScore(episode, selectedPolicyId) : episodeScore(episode);
       return null;
@@ -472,7 +566,7 @@ export function StudentApp({ league }: { league: League }) {
     }).then(async (response) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not open replay");
-      if (!cancelled) setViewer({ url: data.viewer_url, ready: data.ready });
+      if (!cancelled) setViewer({ url: data.viewer_url, ready: data.ready, episodeId: data.episode_id });
     }).catch((cause: Error) => { if (!cancelled) setReplayError(cause.message); });
     return () => { cancelled = true; };
   }, [replayId, replayAvailable, replayOwner]);
@@ -499,7 +593,7 @@ export function StudentApp({ league }: { league: League }) {
       fetch(`/api/replay-session?viewerUrl=${encodeURIComponent(viewer.url)}`).then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? "Replay failed to start");
-        if (!cancelled && data.ready) { setReplayError(""); setViewer({ url: viewer.url, ready: true }); }
+        if (!cancelled && data.ready) { setReplayError(""); setViewer({ ...viewer, ready: true }); }
       }).catch((cause: Error) => { if (!cancelled) setReplayError(cause.message); });
     }, 2500);
     return () => { cancelled = true; window.clearInterval(timer); };
@@ -517,15 +611,21 @@ export function StudentApp({ league }: { league: League }) {
     if (!response.ok) { setError(data.error ?? "Could not sign in"); return; }
     setToken("");
     setEmail(data.email);
+    setAccountName(data.name ?? null);
+    setSubjectId(data.subjectId ?? "");
     if (data.subjectId) identifyStudent(data.subjectId, data.email);
     track(events.signedIn, {});
   }
 
   async function signOut() {
+    companion.stopTalk(); companion.stopScreen();
     track(events.signedOut, {});
-    await fetch("/api/session", { method: "DELETE" });
+    const response = await fetch("/api/session", { method: "DELETE" });
+    if (!response.ok) throw new Error("Could not sign out");
+    companion.presentation.reset();
     resetAnalytics();
     setEmail(null);
+    setAccountName(null);
     setSubjectId("");
     setNoticesReady(false);
     previousNoticeIds.current = null;
@@ -536,8 +636,6 @@ export function StudentApp({ league }: { league: League }) {
     setEpisodes([]);
     setPolicyStats(null);
     setPolicyStatsError("");
-    setReplaySnapshot(null);
-    setSnapshotError("");
     setSelectedPolicyId("");
     setSelectedEpisodeId("");
     setLeagueFeed(null);
@@ -652,103 +750,120 @@ export function StudentApp({ league }: { league: League }) {
     });
   }
 
-  function discussPolicyResults() {
-    if (!latestActiveEpisode || !activePolicyId) return;
-    setAnalysisRequest({
-      id: Date.now(),
-      text: "How is my policy doing? Use the league record and the latest hosted game to suggest one testable improvement. Ask me what I noticed in the replay.",
-      context: { kind: "policy-results", policy_version_id: activePolicyId, xp_request_id: latestActiveEpisode.run_id, episode_id: latestActiveEpisode.id, hint: "Use league_standing and hosted_game_status with this run. State sample sizes and keep league and hosted results separate." },
-      reference: { kind: "policy-results", label: `${policyLabel(activePolicyId)} · match #${(latestActiveEpisode.job_index ?? 0) + 1}`, episodeId: latestActiveEpisode.id, runId: latestActiveEpisode.run_id, policyVersionId: activePolicyId },
-    });
-  }
-
   const matchStatsBlock = <>
     {matchStats ? <details className="replay-metrics"><summary>Match statistics <span>{matchStats.steps === null ? "" : `${matchStats.steps} steps`}</span></summary>
     <div>{Object.entries(matchStats.game_stats).map(([name, value]) => <span key={name}>{name.replaceAll("_", " ")} <b>{new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)}</b></span>)}
     {matchStats.policy_stats.map((policy) => <span key={policy.position}>Seat {policy.position + 1} reward <b>{new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(policy.avg_reward)}</b></span>)}
     {matchStats.policy_stats.flatMap((policy) => Object.entries(policy.avg_metrics).filter(([name]) => name !== "reward").map(([name, value]) => <span key={`${policy.position}-${name}`}>Seat {policy.position + 1} {name.replaceAll("_", " ")} <b>{new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)}</b></span>))}</div>
     </details> : null}
-    {matchStatsError ? <p className="error replay-metrics-error">{matchStatsError}</p> : null}
+    {matchStatsError && matchStatsError !== replayError ? <p className="error replay-metrics-error">{matchStatsError}</p> : null}
   </>;
 
-  const workspacePanel = <section className="preview-card">
+  function selectWork(id: string) { if(recordingCoaching)return; setPresentationView(null); setSelectedExperiment(null); setSelectedWork(id); setCreatingWork(false); companion.presentation.manual(); selectTab("experiments"); if(window.location.pathname!==`/sessions/${id}`)window.history.pushState(null,"",`/sessions/${id}`); }
+  useEffect(()=>{
+    const restore=()=>{const match=window.location.pathname.match(/^\/sessions\/([^/]+)$/);setSelectedWork(match?.[1]??null);setCreatingWork(false);setPresentationView(null);setSelectedExperiment(null);if(match)selectTab("experiments");else{const view=new URLSearchParams(window.location.search).get("view");if(view&&workspaceTabs.includes(view as WorkspaceTab))selectTab(view as WorkspaceTab);}};
+    window.addEventListener("popstate",restore);return()=>window.removeEventListener("popstate",restore);
+  },[]);
+  function newWork() { if(recordingCoaching)return; setPresentationView(null); setSelectedExperiment(null); setSelectedWork(null); setCreatingWork(true); setActiveTab("experiments"); }
+  function inspectExperiment(id:string) { setSelectedExperiment(id);setSelectedWork(null);setCreatingWork(false);setActiveTab("experiments");setPresentationView(null); }
+  function workOverview() { setSelectedExperiment(null); setSelectedWork(null); setCreatingWork(false); setActiveTab("experiments"); }
+  useEffect(() => { if (subjectId) companion.presentation.restoreFor(subjectId); }, [subjectId, companion.presentation.restoreFor]);
+  const [wikiPage,setWikiPage]=useState<WikiPage>('overview');
+  const [wikiEntry,setWikiEntry]=useState<string|undefined>();
+  useEffect(() => { companion.presentation.setHuman({ tab: activeTab, wikiPage, entityId:wikiEntry??null, revision: currentRevision?.ir.update.revision ?? null, branch: branchId ?? null, cycleId: cycleId ?? null, outcomeLast, opponent: opponentFilter, replay: replayId || null }); }, [activeTab, wikiPage, wikiEntry, currentRevision?.ir.update.revision, branchId, cycleId, outcomeLast, opponentFilter, replayId, companion.presentation.setHuman]);
+
+  const [presentationView,setPresentationView]=useState<WorkspaceView|null>(null);
+  const [savedViews,setSavedViews]=useState<{id:string;title:string}[]>([]);
+  const [openedViews,setOpenedViews]=useState<WorkspaceView[]>([]);
+  useEffect(()=>{setOpenedViews([]);setSavedViews([]);setPresentationView(null);},[email]);
+  const viewKey=(view:WorkspaceView)=>view.artifactId ?? JSON.stringify([view.view,view.revision,view.last,view.opponent,view.branchId,view.cycleId,view.highlight,view.wikiPage,view.entityId,view.experimentId,view.opponentPolicyId]);
+  const extraViews=[...new Map([...companion.presentation.state.history, ...(companion.presentation.state.current?[companion.presentation.state.current]:[]), ...openedViews,
+    ...savedViews.map(v=>({view:"custom" as const,artifactId:v.id,last:10 as const,reason:v.title}))].map(v=>[viewKey(v),v])).values()];
+  useEffect(()=>{
+    if(!email)return;const abort=new AbortController();
+    void fetch("/api/views",{signal:abort.signal}).then(async r=>{if(r.ok)setSavedViews((await r.json()).views);}).catch(()=>{});
+    return()=>abort.abort();
+  },[email,companion.presentation.state.current?.artifactId]);
+  useEffect(()=>{setPresentationView(null);},[activeTab]);
+  const openPresentation = useCallback((view: WorkspaceView) => {
+    if (recordingCoaching) return;
+    window.history.replaceState(null, "", presentationRoute(view));
+    if(view.view==="custom"){setOpenedViews(old=>[...old.filter(v=>v.artifactId!==view.artifactId),view]);setPresentationView(view);if(window.matchMedia("(max-width: 800px)").matches)closePresent();return;}
+    setPresentationView(null);
+    setOpponentPolicyId(view.opponentPolicyId);
+    selectTab(view.view); if(view.view==="development"){setWikiPage(view.wikiPage??(view.branchId?"source":"overview"));setWikiEntry(view.entityId);} setBranchId(view.branchId); setCycleId(view.cycleId);
+    setOutcomeLast(view.last); setOpponentFilter(view.opponent ?? "");
+    setViewRevision(view.revision ?? null);
+    if ((view.view === "performance" || view.view === "episodes") && !view.revision) setSelectedPolicyId("");
+    if (view.revision) {
+      const version = workspace?.versions.find(v=>v.revision===view.revision);
+      if ((view.view === "performance" || view.view === "episodes") && version?.policyVersionId) setSelectedPolicyId(version.policyVersionId);
+    }
+    if (view.view === "experiments") { setSelectedExperiment(view.experimentId??null);setSelectedWork(null); setCreatingWork(false); }
+    if (window.matchMedia("(max-width: 800px)").matches) closePresent();
+  }, [recordingCoaching, workspace?.versions, closePresent]);
+  useEffect(()=>companion.presentation.bind(openPresentation),[companion.presentation.bind,openPresentation]);
+
+  const deepLinkApplied = useRef(false);
+  useEffect(() => {
+    if (deepLinkApplied.current || !email || !workspace) return;
+    deepLinkApplied.current = true;
+    const p = new URLSearchParams(window.location.search);
+    if (!p.has("view")) return;
+    const result = viewSchema.safeParse({ view: p.get("view"), artifactId:p.get("artifact")??undefined, reason: "Opened from a workspace link", opponentPolicyId:p.get("opponentPolicy")??undefined,experimentId:p.get("experiment")??undefined, wikiPage:p.get("wiki")??undefined, entityId:p.get("entity")??undefined, revision: p.has("revision") ? Number(p.get("revision")) : undefined, branchId: p.get("branch") ?? undefined, cycleId: p.get("cycle") ?? undefined, opponent: p.get("opponent") ?? undefined, last: Number(p.get("last") ?? 10) });
+    if (result.success && (!result.data.revision || workspace.versions.some(v => v.revision === result.data.revision))) openPresentation(result.data);
+  }, [email, workspace, openPresentation]);
+
+  const workspacePanel = <section className="preview-card" onPointerDownCapture={companion.presentation.manual} onKeyDownCapture={companion.presentation.manual} inert={compactScreen && (presentExpanded || chatOpen)}>
           <div className="tabs" role="tablist" aria-label="Workspace views">
-            <div><button role="tab" aria-selected={activeTab === "episodes"} className={activeTab === "episodes" ? "active" : ""} onClick={() => { setActiveTab("episodes"); track(events.tabViewed, { tab: "matches" }); }}>Matches</button>
-              <button role="tab" aria-selected={activeTab === "policy"} className={activeTab === "policy" ? "active" : ""} disabled={recordingCoaching} onClick={() => { setActiveTab("policy"); track(events.tabViewed, { tab: "policy", revisions: workspace?.versions.length ?? 0 }); }}>Policy <span className="tab-code">hero.bas</span></button></div>
-            <span className="league-status"><button type="button" className="notice-button" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`} aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen(!notificationsOpen); if (!notificationsOpen) { track(events.updatesOpened, { unread }); markNoticesRead(); } }}>Updates{unread ? <b>{unread > 9 ? "9+" : unread}</b> : null}</button>{defaultPlayer ? <span className="player-label" title="The Softmax player your uploads and league entries are credited to">Player <b>{defaultPlayer}</b></span> : null}<span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span><a className="league-link" href={league.url} target="_blank" rel="noreferrer">NeuralHub league ↗</a></span>
+            <div>{workspaceTabs.map(tab=><button key={tab} id={`tab-${tab}`} role="tab" aria-controls={`workspace-${tab}`} aria-selected={activeTab===tab} tabIndex={activeTab===tab?0:-1} className={activeTab===tab?"active":""} disabled={recordingCoaching} onClick={()=>{setPresentationView(null);setSelectedWork(null);setCreatingWork(false);setActiveTab(tab);}} onKeyDown={e=>{if(!["ArrowRight","ArrowLeft","Home","End"].includes(e.key))return;e.preventDefault();const i=workspaceTabs.indexOf(tab);const next=e.key==="Home"?0:e.key==="End"?workspaceTabs.length-1:(i+(e.key==="ArrowRight"?1:workspaceTabs.length-1))%workspaceTabs.length;setSelectedWork(null);setCreatingWork(false);setPresentationView(null);setActiveTab(workspaceTabs[next]);document.getElementById(`tab-${workspaceTabs[next]}`)?.focus();}}>{tab[0].toUpperCase()+tab.slice(1)}</button>)}</div>
+            <span className="league-status"><button type="button" className="notice-button" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`} aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen(!notificationsOpen); if (!notificationsOpen) { track(events.updatesOpened, { unread }); markNoticesRead(); } }}>Updates{unread ? <b>{unread > 9 ? "9+" : unread}</b> : null}</button>{defaultPlayer ? <span className="player-label" title="The Softmax player your uploads and league entries are credited to">Player <b>{defaultPlayer}</b></span> : null}<span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span><a className="league-link" href={league.url} target="_blank" rel="noreferrer">League ↗</a></span>
           </div>
+          {extraViews.length ? <div className="generated-view-tabs" role="tablist" aria-label="Additional views">
+            <button role="tab" aria-selected={!presentationView} aria-controls={`workspace-${activeTab}`} onClick={()=>setPresentationView(null)}>Workspace</button>
+            {extraViews.map(v=><button key={viewKey(v)} id={`extra-${encodeURIComponent(viewKey(v))}`} role="tab" aria-selected={!!presentationView&&viewKey(presentationView)===viewKey(v)} aria-controls="generated-view-panel" title={v.reason} onClick={()=>setPresentationView(v)}>{v.view==="custom" ? savedViews.find(s=>s.id===v.artifactId)?.title ?? v.reason : `${v.view[0].toUpperCase()+v.view.slice(1)}${v.opponent?` · ${v.opponent}`:v.revision?` · r${v.revision}`:" · Preston"}`}</button>)}
+          </div> : null}
+          {presentationView?<div id="generated-view-panel" role="tabpanel" aria-labelledby={`extra-${encodeURIComponent(viewKey(presentationView))}`}><PresentationPane key={viewKey(presentationView)} view={presentationView} onOpen={openPresentation}/></div>:null}
           {notificationsOpen ? <div className="notice-panel" role="region" aria-label="Policy updates"><div className="notice-panel-head"><strong>Policy updates</strong><button type="button" className="text-button" onClick={() => setNotificationsOpen(false)}>Close ×</button></div>{notices.length ? notices.map((notice) => <div key={notice.id} className={`notice-row ${notice.kind}`}><b>{notice.title}</b><span>{notice.detail}</span><small>{new Date(notice.at).toLocaleString()}</small></div>) : <p className="muted">Your saves, uploads, and hosted game results appear here.</p>}</div> : null}
-          {activeTab === "policy" ? <div className="policy-view">
-            {workspace?.latest ? <div className="policy-stages" aria-label="Current policy progress"><span className="done">✓ r{workspace.latest.ir.update.revision} saved</span><span className={latestSavedUpload ? "done" : "waiting"}>{latestSavedUpload ? "✓ Uploaded" : "○ Upload next"}</span><span className={latestGames.some((game) => game.status === "completed") ? "done" : "waiting"}>{latestGames.some((game) => game.status === "completed") ? latestGames.some((game) => game.replayReady) ? "✓ Replay ready" : "✓ Game complete" : latestGames.some((game) => !["failed", "canceled", "cancelled"].includes(game.status)) ? "◌ Hosted game running" : "○ Play hosted game"}</span>{resumePolicy ? <button type="button" className="secondary" onClick={() => setAnalysisRequest({ id: Date.now(), text: resumePolicy.text })}>{resumePolicy.label} ↗</button> : null}</div> : null}
-            <div className="policy-toolbar"><div><span className="eyebrow">Symbolic policy</span><h2>hero.bas</h2>
-              <p>{viewRevision !== null ? `Revision ${viewRevision}` : workspace?.latest ? `Revision ${workspace.latest.ir.update.revision} · working copy` : "Starter policy"}{currentUpload?.label ? ` · uploaded as ${currentUpload.label}` : ""}{currentUpload ? currentUpload.player ? <> · player <b>{currentUpload.player}</b></> : null : defaultPlayer ? <> · uploads as player <b>{defaultPlayer}</b></> : null}</p></div>
-              <div className="policy-actions">
-                <button className="secondary" onClick={downloadPolicy} disabled={!currentRevision}>BASIC ↓</button>
-                <button className="secondary" onClick={downloadRevision} disabled={!currentRevision}>IR + BASIC ↓</button>
-                {currentUpload ? <button className="secondary" onClick={enterLeague}>Enter league ↗</button> : null}</div></div>
-            {submission ? <p className="submission">{submission}</p> : null}
-            {workspace?.draft ? <div className="draft-banner"><b>{workspace.draft.conflict ? "Draft from an older revision" : "Unsaved policy draft"}</b><span>{Math.ceil(workspace.draft.bytes / 1024)} KiB · kept since {new Date(workspace.draft.updated_at).toLocaleString()}</span><button type="button" className="secondary" onClick={() => setAnalysisRequest({ id: Date.now(), text: workspace.draft?.conflict ? "Merge my older draft/conflicting-hero.bas into the latest saved hero.bas without losing newer changes. Then save, upload, and request one hosted game." : "Finish saving my unsaved hero.bas draft, then upload it and request a hosted game. Check git diff first so you preserve my edit." })}>Finish in chat ↗</button><button type="button" className="text-button" onClick={() => void discardDraft()}>Discard</button></div> : null}
-            {workspace?.versions.length ? <ol className="version-history" aria-label="Saved revisions">
-              <li className={viewRevision === null ? "active" : ""}><button type="button" onClick={() => setViewRevision(null)}><b>Latest</b><span>Working copy · r{workspace.latest?.ir.update.revision ?? 0}</span></button></li>
-              {[...workspace.versions].reverse().map((version) => <li key={version.id} className={viewRevision === version.revision ? "active" : ""}>
-                <button type="button" onClick={() => { setViewRevision(version.revision); track(events.revisionViewed, { revision: version.revision, uploaded: !!version.policyVersionId, games: version.games }); }}><b>r{version.revision}</b><span>{version.summary}</span>
-                  <small>{new Date(version.created_at).toLocaleString()}{version.label ? ` · ${version.label}${version.player && version.player !== defaultPlayer ? ` · player ${version.player}` : ""}` : " · not uploaded"}{version.scored ? ` · hosted mean ${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(version.hostedMean ?? 0)} over ${version.scored} scored seats` : version.games ? ` · ${version.games} game${version.games === 1 ? "" : "s"} requested` : ""}</small></button>
-              </li>)}
-            </ol> : <div className="version-empty"><p className="muted">No saved revisions yet. Start by uploading the official starter policy as revision 1, then ask the Neural Viking Agent for one change at a time. Each save appears here with its hypothesis and results.</p>
-              {starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : null}</div>}
-            {currentRevision ? <SemanticPolicy key={currentRevision.revisionId} revision={currentRevision} /> : <p className="muted policy-loading">Loading hero.bas…</p>}
-          </div> : <div className="episodes-view">
-            <div className="episodes-heading"><div><img src="/gota/logo.png" alt="" /><div><h2>Matches</h2><p>{activePlayer ? <>Playing as <b>{activePlayer}</b> in {league.name}</> : league.name}</p></div></div></div>
-            {pendingExperiments.length ? <div className="job-banner"><span className="status-dot" />
-              <span>{pendingExperiments.length === 1 ? `Hosted game running: ${pendingExperiments[0].title}` : `${pendingExperiments.length} hosted games running`}. Results appear here and in the chat when they finish.</span></div> : null}
-            {activePolicyId ? <section className="policy-performance" aria-label="Policy performance">
-              <div className="performance-top"><div><span className="eyebrow">Policy performance</span><strong>{policyLabel(activePolicyId)}</strong><span className="performance-player">{activePlayer ? `Player ${activePlayer}` : "Player unknown"} · {entered.has(activePolicyId) ? "entered in the league" : "not entered in the league"}</span></div>
-                <select aria-label="Choose policy version" value={selectedPolicyId} disabled={recordingCoaching} onChange={(event) => { setSelectedPolicyId(event.target.value); setSelectedEpisodeId(""); setLeagueSelection(null); setMatchView(null); setViewer(null); }}>
-                  <option value="">{leagueEntry ? "League entry" : "Latest upload"} · all practice games</option>
-                  {[...new Set([...uploadedVersions.map((version) => version.policyVersionId), ...policyIds])].map((id) => <option key={id} value={id}>{policyLabel(id)}{entered.has(id) ? " · in league" : ""}</option>)}
-                </select></div>
-              <div className="performance-values">
-                <div><strong>{activeRecord?.games ? `${((activeRecord.wins / activeRecord.games) * 100).toFixed(1)}%` : leaguePolicyId && !activeRecord ? "…" : "—"}</strong><span>League win % · {activeRecord?.games ? `${activeRecord.wins} won, ${activeRecord.losses} lost, ${activeRecord.time_limits} time limit in ${activeRecord.complete ? "" : "the newest "}${activeRecord.games} games · 72h` : activeRecord || !leaguePolicyId ? "No finished league games in the last 72 hours" : "Counting league games"}</span></div>
-                <div><strong>{activeStanding ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(activeStanding.score) : "—"}</strong><span>League score · {activeStanding ? `mean per game · rank ${activeStanding.rank} of ${policyStats?.policies.length ?? "?"} · 72h` : "not on the 72h leaderboard"}</span></div>
-                <div><strong>{hostedMean === null ? "—" : new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(hostedMean)}</strong><span>Practice mean score · {activeScores.length} hosted games</span></div>
-              </div>
-              {replaySnapshot ? <div className="snapshot-metrics"><div><strong>Replay behavior · {replaySnapshot.games} hero-games</strong><span>{new Date(replaySnapshot.windowStart).toLocaleDateString()} – {new Date(replaySnapshot.windowEnd).toLocaleDateString()} · dated snapshot</span></div>
-                {["kills", "deaths", "tower_kills", "xp", "rejected_share"].map((name) => <div key={name}><b>{replaySnapshot.values[name] === undefined ? "—" : name === "rejected_share" ? `${(replaySnapshot.values[name] * 100).toFixed(1)}%` : new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(replaySnapshot.values[name])}</b><span>{name.replaceAll("_", " ")}</span></div>)}
-              </div> : null}
-              <div className="performance-bottom"><span>A win is a destroyed enemy fort. A game that reaches the time limit scores 0 for both sides and is not a win. Practice games are scored separately.</span>
-                <button className="secondary" disabled={!latestActiveEpisode} onClick={discussPolicyResults}>Discuss results ↗</button></div>
-              {policyStatsError ? <p className="error">{policyStatsError}</p> : null}
-              {snapshotError ? <p className="error">{snapshotError}</p> : null}
-            </section> : null}
+          <div className="workspace-tab" id="workspace-performance" role="tabpanel" aria-labelledby="tab-performance" hidden={!!presentationView || activeTab !== "performance"}><div className="episodes-view">
+            <div className="league-overview-heading"><div><h2>Performance</h2><p>{activeStanding?.player_name ?? activePlayer ?? "Your player"} · {activePolicyId ? policyLabel(activePolicyId) : "No policy selected"}</p></div><div><button className="text-button" onClick={()=>setRefreshKey(k=>k+1)}>Refresh</button><a href={league.url} target="_blank" rel="noreferrer">League ↗</a></div></div>
+            <PerformanceOverview standings={policyStats?.standings ?? []} activePlayerId={activePlayerId} leagueName={league.name} loading={!policyStats && !policyStatsError} record={activeRecord} />
+            <div className="league-data-note">{policyStatsError || leagueRecordError || leagueError ? "Some results could not refresh. Displayed data may be out of date." : policyStats?.checkedAt ? `Updated ${new Date(policyStats.checkedAt).toLocaleTimeString()} · MMR belongs to the player across policy versions.` : "Loading live league data…"}</div>
+            <div className="performance-filters"><SelectField aria-label="Choose policy version" value={selectedPolicyId} disabled={recordingCoaching} onValueChange={setSelectedPolicyId} options={policyVersionOptions.map(o=>({...o,label:o.label.replace(" · all practice games","")}))}/><label>Episodes <SelectField aria-label="Outcome window" value={String(outcomeLast)} onValueChange={v=>setOutcomeLast(Number(v) as 10|25|50)} options={[10,25,50].map(n=>({value:String(n),label:`Last ${n}`}))}/></label><Input className="text-xs" aria-label="Opponent filter" value={opponentFilter} onChange={e=>setOpponentFilter(e.target.value)} placeholder="Filter opponents"/></div>
+            <PerformanceEvidence standings={policyStats?.standings ?? []} ownPlayerIds={ownPlayerIds} activePlayerId={activePlayerId} rounds={leagueRows} last={outcomeLast} opponent={opponentFilter} error={leagueError} loading={(!policyStats && !policyStatsError) || (!!leaguePolicyId && !leagueReady && !leagueError)} onRound={id=>{const round=leagueRows.find(r=>r.id===id);if(round)openLeagueEpisode(round);}}/>
+          </div></div>
+          <div className="workspace-tab" id="workspace-episodes" role="tabpanel" aria-labelledby="tab-episodes" hidden={!!presentationView || activeTab !== "episodes"}><div className="episodes-view compact-episodes">
+            <div className="episode-toolbar"><h2>Episodes</h2><SelectField aria-label="Episodes policy version" value={selectedPolicyId} disabled={recordingCoaching} onValueChange={id=>{setSelectedPolicyId(id);setSelectedEpisodeId("");setLeagueSelection(null);setViewer(null);}} options={policyVersionOptions}/></div>
             {leagueSelection ? <section ref={replayPanelRef} className="replay-panel" aria-label="Selected league replay">
               <div className="replay-head"><div><span className="eyebrow">League replay{selectedLeagueEpisode?.outcome ? ` · ${leagueOutcomeLabel[selectedLeagueEpisode.outcome]}` : ""}</span><strong>{leagueSelection.label}</strong></div>
                 <div className="replay-head-actions">
                   <button className="text-button" onClick={toggleFullscreen} aria-pressed={fullscreen}>{fullscreen ? "Exit full screen" : "Full screen ⤢"}</button>
-                  <button className="text-button" onClick={() => { setLeagueSelection(null); setViewer(null); setReplayError(""); }}>Close ×</button></div></div>
-              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready ? <ReplayFrame src={viewer.url} title={`Replay for ${leagueSelection.label}`} /> : <div className="replay-state">Starting replay…</div>}
+                  <button className="text-button" disabled={recordingCoaching} onClick={() => { setLeagueSelection(null); setViewer(null); setReplayError(""); }}>Close ×</button></div></div>
+              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && viewer.episodeId ? <ReplayCoaching key={leagueSelection.id} episode={{id:leagueSelection.id,episode_id:viewer.episodeId,policyVersionId:leagueSelection.policyVersionId,seats:selectedLeagueEpisode?.seats}} sessions={coaching.filter(item=>item.episode_id===viewer.episodeId)} onSaved={()=>setRefreshKey(key=>key+1)} onDiscuss={session=>discussCoaching(session)} onOpenSession={selectWork} onRecordingChange={setRecordingCoaching} replay={<ReplayFrame episodeId={leagueSelection.id} versionId={workspace?.versions.find(v => v.policyVersionId === leaguePolicyId)?.id} src={viewer.url} title={`Replay for ${leagueSelection.label}`} />}/> : viewer?.ready ? <ReplayFrame episodeId={leagueSelection.id} versionId={workspace?.versions.find(v => v.policyVersionId === leaguePolicyId)?.id} src={viewer.url} title={`Replay for ${leagueSelection.label}`} /> : <div className="replay-state">Starting replay…</div>}
               <div className="replay-footer">
                 <a href={`https://softmax.com/observatory/v2/episode-requests/${leagueSelection.id}/watch`} target="_blank" rel="noreferrer">Open on Softmax ↗</a>
                 {selectedLeagueEpisode ? <span title={leagueRoster(selectedLeagueEpisode)}>{selectedLeagueEpisode.side ? `Your heroes: ${selectedLeagueEpisode.side} side, seat${selectedLeagueEpisode.seats.length === 1 ? "" : "s"} ${selectedLeagueEpisode.seats.map((seat) => seat + 1).join(", ")}` : ""}</span> : null}
               </div>
               {matchStatsBlock}
-              <div className="replay-note-box"><label htmlFor="league-replay-note">Notice something?</label>
-                <div><textarea id="league-replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero retreated too early…" />
-                  <button className="secondary" disabled={!replayNote.trim()} onClick={discussLeagueReplay}>Discuss in chat ↗</button></div></div>
+              {!coachingAvailable || !viewer?.episodeId ? <div className="replay-note-box"><label htmlFor="league-replay-note">Notice something?</label>
+                <div><Textarea className="text-xs" id="league-replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero retreated too early…" />
+                  <button className="secondary" disabled={!replayNote.trim()} onClick={discussLeagueReplay}>Discuss in chat ↗</button></div></div>:null}
             </section> : null}
             {selectedEpisode ? <section ref={replayPanelRef} className="replay-panel" aria-label="Selected replay">
               <div className="replay-head"><div><span className="eyebrow">Replay · #{(selectedEpisode.job_index ?? 0) + 1}</span><strong>{selectedEpisode.run_title || "Hosted game"}</strong></div>
                 <div className="replay-head-actions">
                   <button className="text-button" onClick={toggleFullscreen} aria-pressed={fullscreen}>{fullscreen ? "Exit full screen" : "Full screen ⤢"}</button>
                   <button className="text-button" disabled={recordingCoaching} onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div></div>
-              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && selectedEpisode.episode_id ? <ReplayCoaching key={selectedEpisode.id} episode={selectedEpisode} sessions={coaching.filter((item) => item.episode_id === selectedEpisode.episode_id)} onSaved={() => setRefreshKey((key) => key + 1)} onDiscuss={(session) => discussCoaching(session, "apply")} onRecordingChange={setRecordingCoaching} focusSessionId={focusCoachingId} replay={<ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} />} /> : viewer?.ready ? <ReplayFrame src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
+              {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && selectedEpisode.episode_id ? <ReplayCoaching key={selectedEpisode.id} episode={selectedEpisode} sessions={coaching.filter((item) => item.episode_id === selectedEpisode.episode_id)} onSaved={() => setRefreshKey((key) => key + 1)} onDiscuss={(session) => discussCoaching(session)} onOpenSession={selectWork} onRecordingChange={setRecordingCoaching} focusSessionId={focusCoachingId} replay={<ReplayFrame episodeId={selectedEpisode.id} versionId={workspace?.versions.find(v => selectedEpisode.scores.some(score => score.policy_version_id === v.policyVersionId))?.id} src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} />} /> : viewer?.ready ? <ReplayFrame episodeId={selectedEpisode.id} versionId={workspace?.versions.find(v => selectedEpisode.scores.some(score => score.policy_version_id === v.policyVersionId))?.id} src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
               <div className="replay-footer">
                 <a href={`https://softmax.com/observatory/v2/episode-requests/${selectedEpisode.id}/watch`} target="_blank" rel="noreferrer">Open on Softmax ↗</a>
+                {leagueSelection || selectedEpisode ? <BackgroundButton key={leagueSelection?.id??selectedEpisode?.id} label="Analyze replay" onOpen={selectWork} input={{kind:'research',objective:`Analyze episode ${leagueSelection?.id??selectedEpisode?.id}. Read its recorded outcomes, structured statistics and available replay evidence. Explain important decisions only when supported; distinguish measured facts from hypotheses.`,acceptanceCriteria:'Save an evidence-linked analysis, limitations, and concrete follow-up tests.',context:{episodeId:leagueSelection?.id??selectedEpisode?.id,mode:'replay',title:'Replay analysis'}}}/> : null}
                 {selectedCoaching?.latest_analysis?.status === "complete" && !viewer?.ready ? <button className="text-button" onClick={() => discussCoaching(selectedCoaching)}>Discuss coaching ↗</button> : null}
                 {coachingError ? <span className="error">{coachingError}</span> : null}
               </div>
               {matchStatsBlock}
               {!coachingAvailable ? <div className="replay-note-box"><label htmlFor="replay-note">Notice something?</label>
-                <div><textarea id="replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero retreated too early…" />
+                <div><Textarea className="text-xs" id="replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero retreated too early…" />
                   <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Discuss in chat ↗</button></div></div> : null}
             </section> : null}
             <div className="match-views">
@@ -760,17 +875,18 @@ export function StudentApp({ league }: { league: League }) {
             </div>
             {view === "league" ? <>
               {leagueError ? <p className="error">{leagueError}</p> : null}
-              {!activeVersion ? <div className="empty-games"><p>League rounds appear here once a revision is uploaded and entered in the league.</p></div>
+              {leagueRecordError ? <p className="error">{leagueRecordError}</p> : null}
+              {!leaguePolicyId ? <div className="empty-games"><p>League rounds appear here once a revision is uploaded and entered in the league.</p></div>
                 : !leagueReady ? leagueError ? null : <p className="muted">Loading league episodes…</p>
-                : !leagueRows.length ? <div className="empty-games"><p>{policyLabel(activeVersion.policyVersionId)} has not played a league round yet. {entered.has(activeVersion.policyVersionId) ? arena?.league.rounds_paused_at ? "It is entered, and league rounds are paused right now." : "It is entered; its first round appears here when the league schedules it." : "It is not entered in the league, so the league does not schedule it."}</p>
-                  {leagueEntry && leagueEntry.id !== activeVersion.id ? <button type="button" className="starter-cta" onClick={() => { setSelectedPolicyId(leagueEntry.policyVersionId); setMatchView("league"); }}>Show league episodes for r{leagueEntry.revision}</button>
-                    : !entered.has(activeVersion.policyVersionId) ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: `Enter revision r${activeVersion.revision} in the NeuralHub league.` })}>Enter r{activeVersion.revision} in the league ↗</button> : null}</div>
+                : !leagueRows.length ? <div className="empty-games"><p>{policyLabel(leaguePolicyId)} has not played a league round yet. {entered.has(leaguePolicyId) ? arena?.league.rounds_paused_at ? "It is entered, and league rounds are paused right now." : "It is entered; its first round appears here when the league schedules it." : "It is not entered in the league, so the league does not schedule it."}</p>
+                  {leagueEntry && leagueEntry.id !== activeVersion?.id ? <button type="button" className="starter-cta" onClick={() => { setSelectedPolicyId(leagueEntry.policyVersionId); setMatchView("league"); }}>Show league episodes for r{leagueEntry.revision}</button>
+                    : activeVersion && !entered.has(leaguePolicyId) ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: `Enter revision r${activeVersion.revision} in the ${league.name} league (${league.id}).` })}>Enter r{activeVersion.revision} in the league ↗</button> : null}</div>
                 : <>
                   <p className="league-tally">{leagueDecided.length ? <>Of the {leagueDecided.length} {leagueFeed?.nextCursor ? "newest " : ""}finished episodes: <b>{leagueTally.won} won</b>, <b>{leagueTally.lost} lost</b>, <b>{leagueTally.time_limit} hit the time limit</b> with no fort destroyed. That scores 0 for both sides and is not a win.</> : "No league episode has finished yet."}</p>
-                  <div className="episode-table-wrap"><table className="episode-table league-table"><thead><tr><th>Round</th><th>Played</th><th>Side</th><th>Against</th><th>Result</th><th title="Mean score across the heroes this policy controlled">Score / hero</th></tr></thead><tbody>
+                  <div className="episode-table-wrap"><table className="episode-table league-table" aria-label="League episodes"><thead><tr><th>Round</th><th>Played</th><th>Side</th><th>Against</th><th>Result</th><th title="Mean score across the heroes this policy controlled">Score / hero</th></tr></thead><tbody>
                     {leagueRows.map((episode) => {
                       const playable = episode.status === "completed" && !!episode.replay_url && !recordingCoaching;
-                      return <tr key={episode.id} className={`${leagueSelection?.id === episode.id ? "selected" : ""}${playable ? "" : " unplayable"}`} tabIndex={playable ? 0 : -1} role="button" aria-disabled={!playable} aria-label={`Open replay for league round ${episode.round.number} against ${leagueAgainst(episode)}`} onClick={() => { if (playable) openLeagueEpisode(episode); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
+                      return <tr key={episode.id} className={`${leagueSelection?.id === episode.id ? "selected" : ""}${playable ? "" : " unplayable"}`} tabIndex={playable ? 0 : -1} role="button" data-present-action="click" aria-disabled={!playable} aria-label={`Open replay for league round ${episode.round.number} against ${leagueAgainst(episode)}`} onClick={() => { if (playable) openLeagueEpisode(episode); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
                         <td><strong>#{episode.round.number}</strong></td>
                         <td>{new Date(episode.created_at).toLocaleString()}</td>
                         <td>{episode.side ? `${episode.side} · ${episode.seats.length} ${episode.seats.length === 1 ? "hero" : "heroes"}${episode.format === "mixed" ? " · mixed team" : ""}` : "—"}</td>
@@ -779,18 +895,18 @@ export function StudentApp({ league }: { league: League }) {
                         <td className="score-cell">{episode.score === null ? "—" : new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(episode.score)}</td>
                       </tr>;
                     })}</tbody></table></div>
-                  <div className="league-more">{leagueFeed?.nextCursor ? <button type="button" className="secondary" disabled={leagueLoading} onClick={loadMoreLeague}>{leagueLoading ? "Loading…" : "Load 50 more"}</button> : null}<span>{leagueFeed?.nextCursor ? `Showing the ${leagueRows.length} newest league episodes for ${policyLabel(activeVersion.policyVersionId)}.` : `All ${leagueRows.length} league episodes for ${policyLabel(activeVersion.policyVersionId)}.`}</span></div>
+                  <div className="league-more">{leagueFeed?.nextCursor ? <button type="button" className="secondary" disabled={leagueLoading} onClick={loadMoreLeague}>{leagueLoading ? "Loading…" : "Load 50 more"}</button> : null}<span>{leagueFeed?.nextCursor ? `Showing the ${leagueRows.length} newest league episodes for ${policyLabel(leaguePolicyId)}.` : `All ${leagueRows.length} league episodes for ${policyLabel(leaguePolicyId)}.`}</span></div>
                 </>}
             </> : <>
-            {workspace && workspace.versions.length > 1 ? <div className="revision-comparison"><div><span className="eyebrow">Revision comparison</span><p>Same NeuralHub hosted self-play setup · separate games · scores are per seat. Small samples are directional. Deaths appear when the hosted game reports them; current episodes report only reward.</p></div><div className="revision-comparison-table"><span>Revision</span><span>Mean score</span><span>Deaths / seat</span><span>Games</span>{workspace.versions.slice(-4).reverse().map((version) => <div className="revision-comparison-row" key={version.id}><strong>r{version.revision}</strong><b>{version.hostedMean === null ? "—" : version.hostedMean.toFixed(1)}</b><b>{version.meanDeaths === null ? "—" : version.meanDeaths.toFixed(1)}</b><span>{version.completedGames}</span></div>)}</div><button type="button" className="secondary" onClick={() => setAnalysisRequest({ id: Date.now(), text: "Compare my latest two policy revisions using hosted score and any available deaths per seat. State the number of games for each, explain uncertainty, and suggest one focused change to hero.bas to test next." })}>Discuss comparison ↗</button></div> : null}
+
             {arenaError ? <p className="error">{arenaError}</p> : null}
-            {!arena ? <p className="muted">Loading practice games…</p> : episodes.length === 0 ? <div className="empty-games"><p>{workspace?.experiments.length ? pendingExperiments.length ? "A hosted game is running. Its replay will appear here when ready." : `No playable replay yet. Latest hosted game: ${workspace.experiments[0].status}.` : "No games yet. Ask the Neural Viking Agent to upload your policy and start one."}</p>{starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : workspace?.experiments.length && !pendingExperiments.length ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: "My last hosted game did not produce a replay. Check why, then request one hosted game on my latest saved policy." })}>Check and retry ↗</button> : null}</div> :
-              <div className="episode-table-wrap"><table className="episode-table"><thead><tr>{tableColumns.map((column) => <th key={column.key} aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" onClick={() => sortBy(column.key)}>{column.label}<span aria-hidden="true">{sort.key === column.key ? sort.direction === "asc" ? " ↑" : " ↓" : " ↕"}</span></button></th>)}</tr></thead><tbody>
+            {!arena ? <p className="muted">Loading practice games…</p> : episodes.length === 0 ? <div className="empty-games"><p>{workspace?.experiments.length ? pendingExperiments.length ? "A hosted game is running. Its replay will appear here when ready." : `No playable replay yet. Latest hosted game: ${workspace.experiments[0].status}.` : "No games yet. Ask Preston to upload your policy and start one."}</p>{starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : workspace?.experiments.length && !pendingExperiments.length ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: "My last hosted game did not produce a replay. Check why, then request one hosted game on my latest saved policy." })}>Check and retry ↗</button> : null}</div> :
+              <div className="episode-table-wrap"><table className="episode-table" aria-label="Practice episodes"><thead><tr>{tableColumns.map((column) => <th key={column.key} aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" onClick={() => sortBy(column.key)}>{column.label}<span aria-hidden="true">{sort.key === column.key ? sort.direction === "asc" ? " ↑" : " ↓" : " ↕"}</span></button></th>)}</tr></thead><tbody>
                 {sortedEpisodes.map((episode) => {
                   const score = selectedPolicyId ? policyScore(episode, selectedPolicyId) : episodeScore(episode);
                   const policyId = selectedPolicyId || episodePolicyId(episode);
                   const standing = policyId ? boardByPolicy.get(policyId) : undefined;
-                  return <tr key={episode.id} className={selectedEpisodeId === episode.id ? "selected" : ""} tabIndex={recordingCoaching ? -1 : 0} role="button" aria-disabled={recordingCoaching && selectedEpisodeId !== episode.id} aria-label={`Open replay for ${episode.run_title || "hosted game"}, episode ${(episode.job_index ?? 0) + 1}`} onClick={() => { if (recordingCoaching) return; setLeagueSelection(null); setSelectedEpisodeId(episode.id); setViewer(null); setReplayError(""); setReplayNote(""); track(events.replayOpened, { episode_id: episode.id, run_id: episode.run_id, status: episode.status, source: "table" }); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
+                  return <tr key={episode.id} className={selectedEpisodeId === episode.id ? "selected" : ""} tabIndex={recordingCoaching ? -1 : 0} role="button" data-present-action="click" aria-disabled={recordingCoaching && selectedEpisodeId !== episode.id} aria-label={`Open replay for ${episode.run_title || "hosted game"}, episode ${(episode.job_index ?? 0) + 1}`} onClick={() => { if (recordingCoaching) return; setLeagueSelection(null); setSelectedEpisodeId(episode.id); setViewer(null); setReplayError(""); setReplayNote(""); track(events.replayOpened, { episode_id: episode.id, run_id: episode.run_id, status: episode.status, source: "table" }); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
                     <td><strong>#{(episode.job_index ?? 0) + 1}</strong><span>{episode.run_title || "Hosted game"}</span></td>
                     <td className="policy-cell" title={standing?.policy_label ?? policyId ?? "Multiple policies"}>{standing?.policy_label ?? (policyId ? `Policy ${policyId.slice(0, 8)}` : "Mixed")}</td>
                     <td>{new Date(episode.completed_at ?? episode.created_at).toLocaleString()}</td>
@@ -798,42 +914,89 @@ export function StudentApp({ league }: { league: League }) {
                   </tr>;
                 })}</tbody></table>{!sortedEpisodes.length ? <div className="empty-games">No practice games for this policy version yet.</div> : null}</div>}
             </>}
-          </div>}
+          </div></div>
+          <div className="workspace-tab" id="workspace-strategy" role="tabpanel" aria-labelledby="tab-strategy" hidden={!!presentationView || activeTab !== "strategy"}><div className="strategy-view"><div className="strategy-version-select"><label>Policy revision <SelectField aria-label="Strategy revision" value={viewRevision === null ? "" : String(viewRevision)} onValueChange={v=>setViewRevision(v ? Number(v) : null)} options={[{value:"",label:"Latest saved policy"},...(workspace?.versions.map(v=>({value:String(v.revision),label:`r${v.revision} · ${v.summary}`})) ?? [])]}/></label></div>{currentRevision ? <StrategyOverview revision={currentRevision} branchId={branchId} onSource={id=>{setBranchId(id);setWikiPage("source");setActiveTab("development");}} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})}/> : <p>Loading the policy…</p>}<div className="strategy-knowledge-link"><h3>Beliefs and disagreements</h3><p>Inspect our hypotheses, their evidence, and where our views differ.</p><button className="secondary" onClick={()=>{setWikiPage("beliefs");setActiveTab("development");}}>Open shared knowledge ↗</button></div></div></div>
+          <div className="workspace-tab" id="workspace-experiments" role="tabpanel" aria-labelledby="tab-experiments" hidden={!!presentationView || activeTab !== "experiments"}><div className="experiments-view">{selectedExperiment ? <ExperimentDetail key={selectedExperiment} id={selectedExperiment} onBack={workOverview} onVersion={revision=>{setViewRevision(revision);setWikiPage("evidence");setActiveTab("development");}} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})} onReplay={(episodeId,runId)=>openReference({kind:"replay-note",episodeId,runId,label:"Experiment result"})}/> : selectedWork || creatingWork ? <><button className="text-button" onClick={workOverview}>← Experiments</button><TaskPanel feed={taskFeed} selectedId={selectedWork} creating={creatingWork} onSelect={selectWork} onNew={newWork} onCloseNew={workOverview} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})}/></> : <ExperimentTable feed={taskFeed} cycleId={cycleId} onTask={selectWork} onVersion={revision=>{setViewRevision(revision);setActiveTab("strategy");}} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})} onInspect={inspectExperiment} onExperiment={id=>{const episode=episodes.find(e=>e.run_id===id);if(episode?.replay_url)openReference({kind:"replay-note",episodeId:episode.id,runId:id,label:"Experiment result"});else inspectExperiment(id);}}/>}</div></div>
+          <div className="workspace-tab" id="workspace-opponents" role="tabpanel" aria-labelledby="tab-opponents" hidden={!!presentationView||activeTab!=="opponents"}>{activeTab==="opponents"?<Opponents initialPolicyId={opponentPolicyId} onSelect={setOpponentPolicyId} onSession={setAnalysisRequest} onOpenTask={selectWork}/>:null}</div>
+          <div className="workspace-tab" id="workspace-development" role="tabpanel" aria-labelledby="tab-development" hidden={!!presentationView || activeTab !== "development"}>
+            <PolicyWiki revision={currentRevision} page={wikiPage} onPage={setWikiPage} entryId={wikiEntry} onEntry={setWikiEntry} branchId={branchId} onBranch={setBranchId}
+              onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})} leagueURL={league.url} experiments={workspace?.experiments??[]}
+              onExperiment={inspectExperiment}
+              revisionPicker={<SelectField aria-label="Wiki revision" value={viewRevision===null?"":String(viewRevision)} onValueChange={v=>setViewRevision(v?Number(v):null)} options={[{value:"",label:"Latest policy"},...(workspace?.versions.map(v=>({value:String(v.revision),label:`r${v.revision} · ${v.summary}`}))??[])]}/>}
+              actions={<><button className="text-button" onClick={downloadPolicy} disabled={!currentRevision}>BASIC ↓</button><button className="text-button" onClick={downloadRevision} disabled={!currentRevision}>IR + BASIC ↓</button></>}
+              versions={<>
+            {workspace?.latest ? <div className="policy-stages" aria-label="Current policy progress"><span className="done">✓ r{workspace.latest.ir.update.revision} saved</span><span className={latestSavedUpload ? "done" : "waiting"}>{latestSavedUpload ? "✓ Uploaded" : "○ Upload next"}</span><span className={latestGames.some((game) => game.status === "completed") ? "done" : "waiting"}>{latestGames.some((game) => game.status === "completed") ? latestGames.some((game) => game.replayReady) ? "✓ Replay ready" : "✓ Game complete" : latestGames.some((game) => !["failed", "canceled", "cancelled"].includes(game.status)) ? "◌ Hosted game running" : "○ Play hosted game"}</span>{resumePolicy ? <button type="button" className="secondary" onClick={() => setAnalysisRequest({ id: Date.now(), text: resumePolicy.text })}>{resumePolicy.label} ↗</button> : null}</div> : null}
+            <div className="policy-toolbar"><div><span className="eyebrow">Symbolic policy</span><h2>hero.bas</h2>
+              <p>{viewRevision !== null ? `Revision ${viewRevision}` : workspace?.latest ? `Revision ${workspace.latest.ir.update.revision} · working copy` : "Starter policy"}{currentUpload?.label ? ` · uploaded as ${currentUpload.label}` : ""}{currentUpload ? currentUpload.player ? <> · player <b>{currentUpload.player}</b></> : null : defaultPlayer ? <> · uploads as player <b>{defaultPlayer}</b></> : null}</p></div>
+              <div className="policy-actions">
+                {currentUpload ? <button className="secondary" onClick={enterLeague}>Enter league ↗</button> : null}</div></div>
+            {submission ? <p className="submission">{submission}</p> : null}
+            {workspace?.draft ? <div className="draft-banner"><b>{workspace.draft.conflict ? "Draft from an older revision" : "Unsaved policy draft"}</b><span>{Math.ceil(workspace.draft.bytes / 1024)} KiB · kept since {new Date(workspace.draft.updated_at).toLocaleString()}</span><button type="button" className="secondary" onClick={() => setAnalysisRequest({ id: Date.now(), text: workspace.draft?.conflict ? "Merge my older draft/conflicting-hero.bas into the latest saved hero.bas without losing newer changes. Then save, upload, and request one hosted game." : "Finish saving my unsaved hero.bas draft, then upload it and request a hosted game. Check git diff first so you preserve my edit." })}>Finish in chat ↗</button><button type="button" className="text-button" onClick={() => void discardDraft()}>Discard</button></div> : null}
+            {workspace?.versions.length ? <ol className="version-history" aria-label="Saved revisions">
+              <li className={viewRevision === null ? "active" : ""}><button type="button" onClick={() => setViewRevision(null)}><b>Latest</b><span>Working copy · r{workspace.latest?.ir.update.revision ?? 0}</span></button></li>
+              {[...workspace.versions].reverse().map((version) => <li key={version.id} className={viewRevision === version.revision ? "active" : ""}>
+                <button type="button" onClick={() => { setViewRevision(version.revision); track(events.revisionViewed, { revision: version.revision, uploaded: !!version.policyVersionId, games: version.games }); }}><b>r{version.revision}</b><span>{version.summary}</span>
+                  <small>{new Date(version.created_at).toLocaleString()}{version.label ? ` · ${version.label}${version.player && version.player !== defaultPlayer ? ` · player ${version.player}` : ""}` : " · not uploaded"}{version.scored ? ` · hosted mean ${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(version.hostedMean ?? 0)} over ${version.scored} scored seats` : version.games ? ` · ${version.games} game${version.games === 1 ? "" : "s"} requested` : ""}</small></button>
+              </li>)}
+            </ol> : <div className="version-empty"><p className="muted">No saved revisions yet. Start by uploading the official starter policy as revision 1, then ask Preston for one change at a time. Each save appears here with its hypothesis and results.</p>
+              {starterPrompt ? <button type="button" className="starter-cta" onClick={() => setAnalysisRequest({ id: Date.now(), text: starterPrompt.text })}>{starterPrompt.label} ↗</button> : null}</div>}
+              </>}
+              beliefs={<Together refreshKey={workspaceKey} revision={workspace?.latest?.ir.update.revision ?? null} experiments={workspace?.experiments ?? []}
+            onDiscuss={text => setAnalysisRequest({ id: Date.now(), text })} onPolicy={() => {setWikiPage("source");setActiveTab("development");}} onMatches={() => setActiveTab("episodes")}
+            onEvidence={(evidence: ClaimInput["evidence"][number]) => {
+              if (evidence.kind === "revision") { setViewRevision(Number(evidence.ref));setWikiPage("overview");setActiveTab("development"); }
+              else if (evidence.kind === "experiment") {
+                const episode = episodes.find(e => e.run_id === evidence.ref);
+                if (episode) openReference({ kind: "replay-note", episodeId: episode.id, runId: episode.run_id, label: episode.run_title ?? "Hosted test" });
+                else setAnalysisRequest({ id: Date.now(), text: `Inspect hosted test ${evidence.ref} and its evidence for this observation: ${evidence.detail}. Use hosted_game_status; distinguish recorded facts from hypotheses.` });
+              }
+            }} />}
+            />
+          </div>
+
         </section>;
 
-  return <main className={`shell${email ? " signed-in" : ""}${email && !narrow ? " split-shell" : ""}`}>
+  return <main className={`shell${email ? ` signed-in partner-shell${chatOpen ? " chat-open" : ""}` : ""}`}>
     {toast ? <div className={`app-toast ${toast.kind}`} role="status"><b>{toast.title}</b><span>{toast.detail}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast(null)}>×</button></div> : null}
     {!email ? <header className="topbar">
-      <a className="brand" href="/">Softmax IDE <span>Beta</span></a>
+      <a className="brand" href="/">Softmax</a>
       <a className="league-link" href={league.url} target="_blank" rel="noreferrer">{league.name} ↗</a>
     </header> : null}
     {!email ? <div className="intro">
-      <p className="eyebrow">Diablo Valley College · student arena</p>
-      <h1>Describe your strategy.<br /><em>Watch your hero play.</em></h1>
-      <p>Ask the Neural Viking Agent to build a policy. It writes one BASIC file, uploads it, and starts a hosted game for you.</p>
+      <p className="eyebrow">Policies, experiments, and replays</p>
+      <h1>Build and learn with Preston.</h1>
+      <p>Develop game policies together. Test ideas, review what happened, and decide what to try next.</p>
     </div> : null}
 
-    {email === undefined ? <section className="card">Loading your session…</section> :
+    {email === undefined ? <section className="card session-loading" aria-label="Account session"><p role="status">{sessionError ? "Couldn’t connect to your session." : "Loading your session…"}</p>{sessionError ? <button type="button" onClick={() => setSessionAttempt(n => n + 1)}>Retry</button> : null}</section> :
       !email ? <section className="card signin">
-        <div><p className="eyebrow">Step 01</p><h2>Connect your Softmax account</h2>
+        <div><h2>Connect your Softmax account</h2>
           <p>Paste your Softmax user token. We use it to upload and play as you.</p>
           <a href="https://softmax.com/cli-auth" target="_blank" rel="noreferrer">Get a token from Softmax ↗</a>
         </div>
         <form onSubmit={signIn}>
           <label htmlFor="token">User token</label>
-          <input id="token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} required />
-          <button type="submit">Enter the arena</button>
+          <Input id="token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} required />
+          <button type="submit">Get started</button>
           {error ? <p className="error">{error}</p> : null}
         </form>
-      </section> : narrow ? <div className="workspace">
-        <Chat key={email} onActivity={onActivity} onNotice={onChatNotice} onSignOut={signOut} onOpenReference={openReference} analysisRequest={analysisRequest} suggestions={chatSuggestions} starterPrompt={starterPrompt} recordingCoaching={recordingCoaching} playerName={defaultPlayer} />
-        {workspacePanel}
-      </div> : <Group orientation="horizontal" className="workspace split" defaultLayout={splitLayout} onLayoutChanged={rememberSplit}>
-        <Panel id="chat" className="split-pane" defaultSize="30" minSize={320} maxSize="60">
-          <Chat key={email} onActivity={onActivity} onNotice={onChatNotice} onSignOut={signOut} onOpenReference={openReference} analysisRequest={analysisRequest} suggestions={chatSuggestions} starterPrompt={starterPrompt} recordingCoaching={recordingCoaching} playerName={defaultPlayer} />
-        </Panel>
-        <Separator className="split-handle" aria-label="Resize the chat and workspace panels" />
-        <Panel id="work" className="split-pane" minSize="35">{workspacePanel}</Panel>
-      </Group>}
+      </section> : <>
+        <header className="partner-header" inert={compactScreen && (presentExpanded || chatOpen)}><div className="partner-brand"><a href="/">Softmax</a><GamePicker leagueName={league.name} onSelect={()=>setActiveTab("performance")} disabled={recordingCoaching} /></div>
+        </header>
+        <div className={`partner-body${chatOpen ? " chat-open" : ""}`}>
+          <div className="game-status-rail" inert={compactScreen && (presentExpanded || chatOpen)}><SessionRail feed={taskFeed} selected={selectedWork} onSelect={selectWork} onNew={newWork}/><details className="sidebar-league-status"><summary>League status</summary><GameStatus record={activeRecord} standing={activeStanding} recent={leagueRows} policy={activePolicyId ? policyLabel(activePolicyId) : null} entered={entered.has(activePolicyId)} loaded={policyStats !== null && (!leaguePolicyId || activeRecord !== null)} error={!!policyStatsError || !!leagueError || !!leagueRecordError} paused={arena ? !!arena.league.rounds_paused_at : null} disabled={recordingCoaching} onMatches={() => { setActiveTab("episodes"); setMatchView("league"); }} onRound={id => { setActiveTab("episodes"); setMatchView("league"); const round = leagueRows.find(r => r.id === id); if (round) openLeagueEpisode(round); }} /></details><AccountMenu name={preferredName || accountName?.trim() || defaultPlayer || email.split("@")[0]} email={email} disabled={recordingCoaching} onSignOut={signOut} /></div>
+          {workspacePanel}
+        </div>
+          <PresentPanel expanded={presentExpanded || chatOpen} busy={presentBusy} activity={presentActivity} feed={taskFeed} waiting={pendingExperiments.length}
+            navigationDisabled={recordingCoaching} onClose={closePresent} onOpenSession={selectWork} currentView={activeTab} typingOpen={chatOpen}
+            onType={()=>{setChatOpen(open=>!open);if(!chatOpen)requestAnimationFrame(()=>chatDock.current?.querySelector<HTMLTextAreaElement>("textarea.aui-composer-input")?.focus());}} onHistory={()=>{setChatOpen(true);window.dispatchEvent(new Event("preston-history-open"));}}
+            onPrompt={text=>{setChatOpen(true);window.dispatchEvent(new Event("preston-history-close"));window.dispatchEvent(new CustomEvent("preston-prompt",{detail:text}));}}>
+          <div ref={chatDock} id="present-chat" className="partner-chat" data-composer-open={chatOpen}>
+            <Chat key={email} onNeedsInput={openTextChat} onPresence={updatePresence} onActivity={onActivity} onNotice={onChatNotice} onOpenReference={openReference} analysisRequest={analysisRequest} suggestions={[]} starterPrompt={starterPrompt} recordingCoaching={recordingCoaching} playerName={defaultPlayer} />
+          </div>
+          </PresentPanel>
+          <button id="present-panel-toggle" className="preston-mobile-launcher" type="button" hidden={presentExpanded || chatOpen} aria-label="Open Preston" aria-controls="present-panel" aria-expanded={false} onClick={() => setPresentExpanded(true)}><img src="/preston/preston-kindred-wisp.webp" width={52} height={52} alt="" /></button>
+      </>}
+
   </main>;
 }

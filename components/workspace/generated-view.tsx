@@ -2,12 +2,12 @@
 import { defaultLeagueId } from "../../lib/league-catalog";
 import { useEffect,useRef,useState } from 'react';
 import { viewDocumentSchema,type ViewDocument } from '../../lib/views/model';
-export function GeneratedView({id,leagueId=defaultLeagueId}:{id:string;leagueId?:string}) {
-  const [data,setData]=useState<{document:ViewDocument;created_at:string}|null>(null),[error,setError]=useState('');
-  useEffect(()=>{const abort=new AbortController();setData(null);setError('');void fetch(`/api/views?id=${encodeURIComponent(id)}&league=${encodeURIComponent(leagueId)}`,{signal:abort.signal}).then(async r=>{if(!r.ok)throw Error('View unavailable');const d=await r.json();const document=viewDocumentSchema.parse(d.document);if(!abort.signal.aborted)setData({...d,document});}).catch(()=>{if(!abort.signal.aborted)setError('This saved view is unavailable.');});return()=>abort.abort();},[id,leagueId]);
-  if(!data)return <p role="status">{error||'Loading view…'}</p>;
+export function GeneratedView({id,leagueId=defaultLeagueId,onAsk}:{id:string;leagueId?:string;onAsk?:(prompt:string)=>void}) {
+  const [data,setData]=useState<{document:ViewDocument;created_at:string}|null>(null),[error,setError]=useState(''),[retry,setRetry]=useState(0);
+  useEffect(()=>{const abort=new AbortController();setData(null);setError('');void fetch(`/api/views?id=${encodeURIComponent(id)}&league=${encodeURIComponent(leagueId)}`,{signal:AbortSignal.any([abort.signal,AbortSignal.timeout(15000)])}).then(async r=>{if(!r.ok)throw Error('View unavailable');const d=await r.json();const document=viewDocumentSchema.parse(d.document);if(!abort.signal.aborted)setData({...d,document});}).catch(()=>{if(!abort.signal.aborted)setError('This saved view is unavailable.');});return()=>abort.abort();},[id,leagueId,retry]);
+  if(!data)return <p role="status">{error||'Loading view…'}{error?<button className="text-button" onClick={()=>setRetry(n=>n+1)}>Retry view</button>:null}</p>;
   return <article className="generated-view"><h2>{data.document.title}</h2><small>Preston’s analysis · {new Date(data.created_at).toLocaleString()}</small>{data.document.summary?<p>{data.document.summary}</p>:null}
-    {data.document.blocks.map((block,i)=><section key={i}><h3>{block.title}</h3>
+    {data.document.blocks.map((block,i)=><section key={i}><div className="generated-block-heading"><h3>{block.title}</h3>{onAsk?<button type="button" aria-label={`Ask about ${block.title}`} onClick={()=>onAsk(`Help me understand “${block.title}” in “${data.document.title}”. What does the evidence suggest I should do next?`)}>Explore ↗</button>:null}</div>
       {block.type==='text'?<p className="generated-text">{block.text}</p>:null}
       {block.type==='table'?<div className="workspace-table-scroll"><table className="workspace-table"><thead><tr>{block.columns.map((c,j)=><th key={j}>{c}</th>)}</tr></thead><tbody>{block.rows.map((r,j)=><tr key={j}>{r.map((cell,k)=><td key={k}>{cell}</td>)}</tr>)}</tbody></table></div>:null}
       {block.type==='steps'?<ol>{block.items.map((item,j)=><li key={j}><strong>{item.label}</strong><p>{item.detail}</p></li>)}</ol>:null}

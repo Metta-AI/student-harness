@@ -3,6 +3,7 @@ import { z } from "zod";
 import { sealJson, unsealJson } from "./crypto";
 import { defaultReasoningEffort, isReasoningEffort, type ReasoningEffort } from "./reasoning";
 import type { PolicyRevision } from "./semantic-ir";
+import { withDatabaseReadTimeout } from "./database-fetch";
 
 let client: SupabaseClient | undefined;
 
@@ -12,7 +13,12 @@ export function db(): SupabaseClient {
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY;
   if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required");
-  client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  client = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    // The UI and durable workers already retry; SDK retries multiply stalled requests.
+    db: { retry: false },
+    global: { fetch: withDatabaseReadTimeout(fetch) },
+  });
   return client;
 }
 

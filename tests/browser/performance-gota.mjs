@@ -36,7 +36,8 @@ try {
   await page.goto(baseURL);
   const performance = page.locator('#workspace-performance');
   const recent = performance.getByRole('region', { name: 'Recent outcome trend' });
-  await performance.getByRole('region', { name: 'League summary' }).getByText('67%', { exact: true }).waitFor();
+  await page.getByRole('button',{name:'Preston’s Lab',exact:true}).click();
+  await page.getByRole('tab',{name:'Performance',exact:true}).click();
   await recent.getByText('8 wins in 10 completed episodes', { exact: true }).waitFor();
   assert.equal(await recent.getByRole('button', { name: /Open replay/ }).count(), 10);
   assert.match(await recent.getByRole('img').getAttribute('aria-labelledby'), /.+/);

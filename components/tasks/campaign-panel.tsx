@@ -3,6 +3,7 @@ import {useEffect,useState} from 'react';
 import {SessionPayload} from './session-payload';
 import {chatModels,modelLabels,type ModelSelection} from '../../lib/model-selection';
 import {reasoningEfforts,reasoningLabels} from '../../lib/reasoning';
+import {readableText} from '../../lib/tasks/communication';
 import {taskActivity} from '../../lib/tasks/activity';
 
 export function CampaignPanel({id}:{id:string}){
@@ -32,7 +33,7 @@ export function CampaignPanel({id}:{id:string}){
   {data.hostedUsage?.requests>0?<small>${Number(data.hostedUsage.reportedUsd).toFixed(2)} reported hosted spend · {data.hostedUsage.costReports}/{data.hostedUsage.requests} game costs reported</small>:null}
   {campaign.protocol.fixtureMode==='fresh-seeds'?<small>Fresh seeds · recorded league lineups · paired baseline/candidate games</small>:null}
   {campaign.model_selection?<div className="campaign-summary"><small>Future sessions</small><select aria-label="Campaign model" value={campaign.model_selection.model} disabled={savingModel||!['active','paused'].includes(campaign.state)} onChange={e=>void changeModel({...campaign.model_selection,model:e.target.value as ModelSelection['model']})}>{chatModels.map(m=><option key={m} value={m}>{modelLabels[m]}</option>)}</select><select aria-label="Campaign reasoning effort" value={campaign.model_selection.effort} disabled={savingModel||!['active','paused'].includes(campaign.state)} onChange={e=>void changeModel({...campaign.model_selection,effort:e.target.value as ModelSelection['effort']})}>{reasoningEfforts.map(e=><option key={e} value={e}>{reasoningLabels[e].label}</option>)}</select></div>:null}
-  <p className="campaign-progress">{campaign.checkpoint.message}</p>
+  <p className="campaign-progress">{readableText(campaign.checkpoint.message??'')}</p>
   {attention.length?<aside className="campaign-attention" aria-label="Session issues"><strong>{attention.filter((s:any)=>['failed','needs_input'].includes(s.status)).length?"Sessions to review":"Recovering sessions"}</strong>{attention.map((s:any)=><a key={s.id} href={`/sessions/${s.id}`}>{s.context?.title??s.objective} · {s.retryAt?'Retrying automatically':s.status==='failed'?'Failed':'Needs attention'} ↗</a>)}</aside>:null}
   {error?<small>{error}</small>:null}
   {studies.length?<div className="campaign-table-wrap"><table><thead><tr><th>Study</th><th>Status</th><th>Wins</th><th>Utility change</th><th>Decision</th></tr></thead><tbody>{studies.map((s:any)=><tr key={s.id}><td><a href={`/sessions/${s.task_id}`}>{s.cohort} · {s.cycle+1} ↗</a></td><td>{s.state==='running'&&s.cohort==='confirmation'&&s.cycle===campaign.cycle&&['freeze','screen'].includes(campaign.phase)?'Reserved':s.state}<div><small>{sessions.find((session:any)=>session.id===s.task_id)?.progress}</small></div></td><td>{s.result?.baselineWins!==undefined?`${s.result.baselineWins} → ${s.result.candidateWins}`:'—'}</td><td>{s.result?.utilityDelta!==undefined?<>{(s.result.utilityDelta*100).toFixed(2)} pp <small>({s.result.interval.map((n:number)=>(n*100).toFixed(2)).join(' to ')})</small></>:'—'}</td><td>{s.result?.passed===undefined?'—':s.result.passed?'Gate passed':'Not promoted'}</td></tr>)}</tbody></table></div>:null}

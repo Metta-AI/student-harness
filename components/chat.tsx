@@ -1,5 +1,5 @@
 "use client";
-import {defaultChatModel,isChatModel,type ChatModel} from "../lib/model-selection";
+import {type ChatModel} from "../lib/model-selection";
 
 import { AssistantRuntimeProvider, AuiConfig, Tools, useAuiEvent, useAuiState, type AssistantRuntime, type ExternalStoreThreadListAdapter } from "@assistant-ui/react";
 import { History, SquarePenIcon } from "lucide-react";
@@ -14,11 +14,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { track } from "../lib/analytics";
 import { events } from "../lib/analytics-events";
-import { defaultReasoningEffort, isReasoningEffort, type ReasoningEffort } from "../lib/reasoning";
+import { type ReasoningEffort } from "../lib/reasoning";
 import { createChatAdapters } from "./chat-adapters";
 import {useCompanion} from "./partner/companion";
 import { useEveChatRuntime } from "./use-eve-chat-runtime";
 import { ChatThreadProvider, ReferenceChip, parseReference, refPattern, studentText, useChatThread, withReference, type AnalysisRequest, type ChatReference, type ChatThreadValue, type StarterPrompt, type SuggestionOrigin } from "./chat-context";
+
+import type {ChatSettings} from "./use-chat-settings";
 
 export { withReference };
 export type { AnalysisRequest, ChatReference, StarterPrompt };
@@ -32,10 +34,10 @@ const sessionGone = /no longer active|session_not_active/i;
 const userText = (message: { content: readonly { type: string; text?: string }[] }) => message.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
 
 /** Sends the prompt a workspace action prepared (coaching, replay notes, policy results) once the thread mounts. */
-function InitialRequest({ request, sendPrompt }: { request: AnalysisRequest | null; sendPrompt: (text: string, context?: Record<string, string>) => void }) {
+function InitialRequest({ request, sendPrompt, disabled }: { request: AnalysisRequest | null; sendPrompt: (text: string, context?: Record<string, string>) => void; disabled:boolean }) {
   const sent = useRef(false);
   useEffect(() => {
-    if (!request || sent.current) return;
+    if (!request || sent.current || disabled) return;
     // Send after the mount has settled. Development strict mode mounts, unmounts, and remounts the
     // thread; a send made during the first pass is dropped with the agent connection it started on.
     const timer = window.setTimeout(() => {
@@ -43,7 +45,7 @@ function InitialRequest({ request, sendPrompt }: { request: AnalysisRequest | nu
       sendPrompt(request.reference ? withReference(request.text, request.reference) : request.text, request.context);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [request, sendPrompt]);
+  }, [request, sendPrompt, disabled]);
   return null;
 }
 
@@ -368,7 +370,7 @@ function ChatThread({ history, historicalConversation, onNeedsInput, onPresence,
         <ChatThreadProvider value={value}>
           <RailChrome title={title} onNew={onNew} history={history}>
             <Presence onPresence={onPresence} />
-            <InitialRequest request={initialRequest} sendPrompt={sendInitial} />
+            <InitialRequest request={initialRequest} sendPrompt={sendInitial} disabled={disabled||modelSettingsSaving} />
             <ThreadAnalytics noteSent={noteSent} />
             <ThreadAbout />
             <StreamStatus resumed={sessionId !== null} sentHere={sentHere} reconnect={reconnect} />
@@ -389,7 +391,9 @@ function ChatThread({ history, historicalConversation, onNeedsInput, onPresence,
   );
 }
 
-export function Chat({ onNeedsInput, onPresence, onActivity, onNotice, onOpenReference, analysisRequest, suggestions, starterPrompt, recordingCoaching, playerName }: {
+export function Chat({ action, settings, onNeedsInput, onPresence, onActivity, onNotice, onOpenReference, analysisRequest, suggestions, starterPrompt, recordingCoaching, playerName }: {
+  action?: {id:number;kind:"history"}|{id:number;kind:"prompt";text:string};
+  settings: ChatSettings;
   onNeedsInput?: () => void;
   onPresence?: (busy: boolean, activity: string | null) => void;
   onActivity: (kind: "tool" | "turn") => void; onOpenReference: (reference: ChatReference) => void;
@@ -408,13 +412,13 @@ export function Chat({ onNeedsInput, onPresence, onActivity, onNotice, onOpenRef
   const [active, setActive] = useState<string | null>(null);
   const [thread, setThread] = useState<{ key: string; sessionId: string | null }>({ key: "new-0", sessionId: null });
   const [request, setRequest] = useState<AnalysisRequest | null>(null);
-  const [chatModel, setChatModel] = useState<ChatModel>(defaultChatModel);
-  const [modelSettingsSaving,setModelSettingsSaving] = useState(true);
-  const settingsBusy=useRef(false);
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(defaultReasoningEffort);
+  const {chatModel,reasoningEffort,onChatModel:changeChatModel,onReasoningEffort:changeReasoningEffort}=settings;
+  const modelSettingsSaving=settings.modelSettingsSaving||!settings.modelSettingsReady;
   const draftCount = useRef(0);
   const seenRequest = useRef(0);
   const restored = useRef(false);
+  const [historyReady,setHistoryReady]=useState(false);
+  const handledAction=useRef(0);
 
   const remember = useCallback((sessionId: string | null) => {
     try {
@@ -440,6 +444,18 @@ export function Chat({ onNeedsInput, onPresence, onActivity, onNotice, onOpenRef
     remember(sessionId);
   }, [remember,resetConversation]);
 
+  // The companion can open while this Activity is paused. Consume its action
+  // after history restoration and child event listeners have mounted.
+  useEffect(()=>{
+    if(!historyReady||!action||handledAction.current===action.id)return;
+    const timer=setTimeout(()=>{
+      handledAction.current=action.id;
+      if(action.kind==='prompt')startNew({id:action.id,text:action.text});
+      else window.dispatchEvent(new Event('preston-history-open'));
+    },0);
+    return()=>clearTimeout(timer);
+  },[action,historyReady,startNew]);
+
   // Reopen the conversation that was on screen before a reload, so an in-flight reply is picked back up.
   useEffect(() => {
     let cancelled = false;
@@ -452,33 +468,9 @@ export function Chat({ onNeedsInput, onPresence, onActivity, onNotice, onOpenRef
       let stored: string | null = null;
       try { stored = window.localStorage.getItem(activeChatKey); } catch { stored = null; }
       if (stored && seenRequest.current === 0 && rows.some((chat) => chat.session_id === stored)) open(stored);
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(()=>{if(!cancelled)setHistoryReady(true);});
     return () => { cancelled = true; };
   }, [open]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/preferences",{signal:AbortSignal.timeout(10000)}).then((response) => response.json()).then((data: { reasoningEffort?: unknown; chatModel?: unknown }) => {
-      if (!cancelled && isChatModel(data.chatModel)) setChatModel(data.chatModel);
-      if (!cancelled && isReasoningEffort(data.reasoningEffort)) setReasoningEffort(data.reasoningEffort);
-    }).catch(() => undefined).finally(()=>{if(!cancelled)setModelSettingsSaving(false);});
-    return () => { cancelled = true; };
-  }, []);
-
-  const changeModelSettings = useCallback(async (patch: {chatModel?:ChatModel;reasoningEffort?:ReasoningEffort}) => {
-    if(settingsBusy.current)return;
-    settingsBusy.current=true;setModelSettingsSaving(true);
-    try {
-      const response=await fetch("/api/preferences",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch),signal:AbortSignal.timeout(10000)});
-      if(!response.ok)throw Error('Save failed');
-      const saved=await response.json();
-      if(isChatModel(saved.chatModel))setChatModel(saved.chatModel);
-      if(isReasoningEffort(saved.reasoningEffort))setReasoningEffort(saved.reasoningEffort);
-    }catch {onNotice("Model settings were not saved","The previous selection is still active. Try again.");}
-    finally {settingsBusy.current=false;setModelSettingsSaving(false);}
-  },[onNotice]);
-  const changeReasoningEffort=useCallback((effort:ReasoningEffort)=>{void changeModelSettings({reasoningEffort:effort});},[changeModelSettings]);
-  const changeChatModel=useCallback((model:ChatModel)=>{void changeModelSettings({chatModel:model});},[changeModelSettings]);
 
   useEffect(() => {
     if (!analysisRequest || seenRequest.current === analysisRequest.id) return;
@@ -545,6 +537,7 @@ export function Chat({ onNeedsInput, onPresence, onActivity, onNotice, onOpenRef
     {linkError?<p className="companion-access-note">Voice is saved in history. Linking it to this chat is temporarily unavailable. <button onClick={()=>setLinkRetry(v=>v+1)}>Retry</button></p>:null}
     {!transcriptSaved?<p className="companion-access-note" role="status">Saving our spoken conversation…</p>:null}
     {historyLoading?<p className="companion-access-note" role="status">Reopening our conversation…</p>:null}
+    {settings.error?<p role="alert" className="px-4 text-xs">{settings.error}{!settings.modelSettingsReady?<button className="text-button" disabled={settings.modelSettingsSaving} onClick={settings.retrySettings}>Retry settings</button>:null}</p>:null}
     <ChatThread history={<ConversationHistory chats={chats} onChat={open} onVoice={openVoice} onRename={rename} onArchive={archive}/>} onNeedsInput={onNeedsInput} onPresence={onPresence} key={thread.key} sessionId={thread.sessionId} title={title} threadList={threadList} initialRequest={thread.sessionId ? null : request} onSession={onSession} onActivity={onActivity} onNotice={onNotice} onOpenReference={onOpenReference} onArchive={() => { if (active) archive(active); }} onNew={() => startNew(null)} fallbackSuggestions={suggestions} starterPrompt={starterPrompt} disabled={recordingCoaching} chatModel={chatModel} onChatModel={changeChatModel} modelSettingsSaving={modelSettingsSaving} reasoningEffort={reasoningEffort} onReasoningEffort={changeReasoningEffort} playerName={playerName} />
   </aside>;
 }

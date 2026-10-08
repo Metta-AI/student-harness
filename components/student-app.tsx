@@ -4,7 +4,8 @@ import {BackgroundButton} from "./tasks/background-button";
 import { selectPerformancePolicy, type LeagueEntry } from "../lib/league-policy-selection";
 import type { LeagueStanding } from "../lib/softmax";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Activity, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePageVisible } from "./use-page-visible";
 import type { PolicyRevision } from "../lib/semantic-ir";
 import { episodeScore, policyScore } from "../lib/policy-metrics";
 import type { LeagueEpisodeSummary } from "../lib/league-episodes";
@@ -16,13 +17,17 @@ import { TaskPanel } from "./tasks/task-panel";
 import { useTaskFeed } from "./tasks/use-task-feed";
 import { GamePicker } from "./partner/game-navigation";
 import { AccountMenu } from "./partner/account-menu";
-import { GameStatus } from "./partner/game-status";
 import { Opponents } from "./workspace/opponents";
 import { ExperimentDetail } from "./workspace/experiment-detail";
+import { ExperimentResults } from "./workspace/experiment-results";
 import { ExperimentTable } from "./workspace/experiment-table";
 import { StrategyOverview } from "./workspace/strategy-overview";
 import { PerformanceEvidence } from "./workspace/performance-evidence";
-import { PerformanceOverview } from "./workspace/performance-overview";
+import { WorkspaceComposer } from "./workspace/workspace-composer";
+import { RequestWorkspace } from "./workspace/request-workspace";
+import { useWorkspaceRequests } from "./workspace/use-workspace-requests";
+import { useChatSettings } from "./use-chat-settings";
+import { CoachingHome } from "./workspace/coaching-home";
 import { PresentationPane } from "./workspace/presentation-pane";
 import { workspaceTabs, viewSchema, presentationRoute, type WorkspaceTab, type WorkspaceView } from "../lib/workspace/presentation";
 import { PolicyWiki } from "./workspace/policy-wiki";
@@ -63,6 +68,7 @@ type CoachingSession = {
   id: string; episode_id: string; status: string; created_at: string; duration_ms: number | null;
   latest_analysis: { id: string; status: string } | null;
   feed: { summary: string | null; quote: string | null; insights: string[] } | null;
+  policy_reference?: { policy_version_id: string | null };
 };
 type ArenaData = {
   league: { rounds_paused_at: string | null };
@@ -77,7 +83,7 @@ type LeaguePolicy = {
 type PolicyStats = { standings: LeagueStanding[]; checkedAt: string; entries: LeagueEntry[]; currentPolicyId?: string | null; division: string; windowHours: number; policies: LeaguePolicy[]; entered: string[] };
 /** One league-round episode from the selected policy version's point of view. */
 type LeagueEpisode = LeagueEpisodeSummary & {
-  id: string; status: string; created_at: string; replay_url: string | null; error: string | null;
+  id: string; episode_id?: string | null; status: string; created_at: string; replay_url: string | null; error: string | null;
   round: { id: string; number: number };
 };
 type LeagueRecord = { policyVersionId: string; games: number; wins: number; losses: number; time_limits: number; window_hours: number; complete: boolean };
@@ -111,6 +117,7 @@ export function StudentApp({ league, initialTaskId }: { league: League; initialT
 
 function StudentWorkspace({ league, initialTaskId }: { league: League; initialTaskId?: string }) {
   const companion = useCompanion();
+  const pageVisible = usePageVisible();
   const [email, setEmail] = useState<string | null | undefined>(undefined);
   const [sessionError, setSessionError] = useState(false);
   const [sessionAttempt, setSessionAttempt] = useState(0);
@@ -131,7 +138,9 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [workspaceError, setWorkspaceError] = useState("");
   const [subjectId, setSubjectId] = useState("");
+  const requests = useWorkspaceRequests(subjectId, league.id);
   const [seenNotices, setSeenNotices] = useState<string[]>([]);
   const [noticesReady, setNoticesReady] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -142,8 +151,17 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
   const [submission, setSubmission] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [starterRevision, setStarterRevision] = useState<PolicyRevision | null>(null);
-  const [activeTab, selectTab] = useState<WorkspaceTab>(initialTaskId?"experiments":"performance");
-  const setActiveTab = useCallback((tab: WorkspaceTab) => { companion.presentation.manual(); if(window.location.pathname.startsWith("/sessions/"))window.history.pushState(null,"",`/?view=${tab}`); selectTab(tab); }, [companion.presentation.manual]);
+  const [activeTab, selectTab] = useState<WorkspaceTab>(initialTaskId?"lab":"performance");
+  const [labMode, setLabMode] = useState(!!initialTaskId);
+  const labTabs = ["lab", ...workspaceTabs] as const;
+  const setActiveTab = useCallback((tab: WorkspaceTab, mode: "workspace" | "lab" = tab === "performance" ? "workspace" : "lab") => {
+    companion.presentation.manual();
+    setLabMode(mode === "lab");
+    if (mode === "workspace" && tab === "performance") setSelectedPolicyId("");
+    const route = `/?view=${tab}${mode === "lab" && tab !== "lab" ? "&mode=lab" : ""}`;
+    if (`${window.location.pathname}${window.location.search}` !== route) window.history.pushState(null, "", route);
+    selectTab(tab);
+  }, [companion.presentation.manual]);
   const [branchId, setBranchId] = useState<string | undefined>();
   const [cycleId, setCycleId] = useState<string | undefined>();
   const [outcomeLast, setOutcomeLast] = useState<10 | 25 | 50>(10);
@@ -177,6 +195,7 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
   const [recordingCoaching, setRecordingCoaching] = useState(false);
   const replayPanelRef = useRef<HTMLElement>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatAction,setChatAction]=useState<{id:number;kind:"history"}|{id:number;kind:"prompt";text:string}>();
   const [presentBusy, setPresentBusy] = useState(false);
   const [presentActivity, setPresentActivity] = useState<string | null>(null);
   const updatePresence = useCallback((busy: boolean, activity: string | null) => {
@@ -196,7 +215,7 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
   }, []);
   const openTextChat = useCallback(() => setChatOpen(true), []);
   const chatDock = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (analysisRequest) setChatOpen(true); }, [analysisRequest]);
+  useEffect(() => { if (analysisRequest && analysisRequest.context?.kind!=="workspace-view") setChatOpen(true); }, [analysisRequest]);
   useEffect(() => {
     if (!chatOpen) return;
     const timer = window.setTimeout(() => chatDock.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(), 100);
@@ -207,7 +226,7 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
   const [focusCoachingId, setFocusCoachingId] = useState<string | undefined>(undefined);
   const openReference = useCallback((reference: ChatReference) => {
     if (window.matchMedia("(max-width: 800px)").matches) { setChatOpen(false); setPresentExpanded(false); }
-    setActiveTab("episodes");
+    setActiveTab("episodes","workspace");
     setViewer(null);
     if (reference.kind === "league-episode" && reference.policyVersionId) {
       setMatchView("league");
@@ -247,6 +266,7 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
     setWorkspaceKey((key) => key + 1);
     if (kind === "turn") setRefreshKey((key) => key + 1);
   }, []);
+  const chatSettings = useChatSettings(email??null);
   const onChatNotice = useCallback((title: string, detail: string) => { setChatOpen(true); setToast({ id: `chat:${Date.now()}`, title, detail, at: new Date().toISOString(), kind: "error" }); }, []);
 
   useEffect(() => {
@@ -339,10 +359,14 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
       if (busy || controller.signal.aborted || document.visibilityState === "hidden") return;
       busy = true;
       void fetch("/api/workspace", {signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)])}).then(async (response) => {
-      const data = await response.json();
-      if(controller.signal.aborted)return;
-      if (response.ok) setWorkspace(data);
-    }).catch(() => undefined).finally(() => { busy = false; });
+        if (!response.ok) throw new Error("Workspace data could not be loaded.");
+        const data = await response.json();
+        if (controller.signal.aborted) return;
+        setWorkspace(data);
+        setWorkspaceError("");
+      }).catch(() => {
+        if (!controller.signal.aborted) setWorkspaceError("Workspace data could not be loaded. Please retry.");
+      }).finally(() => { busy = false; });
     };
     refresh();
     const timer = window.setInterval(refresh, 8000);
@@ -515,7 +539,7 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
   const selectedLeagueEpisode = leagueSelection ? leagueRows.find((episode) => episode.id === leagueSelection.id) : undefined;
   function openLeagueEpisode(episode: LeagueEpisode) {
     if (!leaguePolicyId || recordingCoaching) return;
-    setActiveTab("episodes"); setMatchView("league");
+    setActiveTab("episodes",labMode?"lab":"workspace"); setMatchView("league");
     setSelectedEpisodeId("");
     setLeagueSelection({ id: episode.id, policyVersionId: leaguePolicyId, label: `League round #${episode.round.number} · ${episode.side ?? "both sides"} vs ${leagueAgainst(episode)}` });
     setViewer(null); setReplayError(""); setReplayNote("");
@@ -759,18 +783,24 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
     {matchStatsError && matchStatsError !== replayError ? <p className="error replay-metrics-error">{matchStatsError}</p> : null}
   </>;
 
-  function selectWork(id: string) { if(recordingCoaching)return; setPresentationView(null); setSelectedExperiment(null); setSelectedWork(id); setCreatingWork(false); companion.presentation.manual(); selectTab("experiments"); if(window.location.pathname!==`/sessions/${id}`)window.history.pushState(null,"",`/sessions/${id}`); }
+  function selectWork(id: string) { if(recordingCoaching)return; setPresentationView(null); setSelectedExperiment(null); setSelectedWork(id); setCreatingWork(false); companion.presentation.manual(); setLabMode(true); selectTab("lab"); if(window.location.pathname!==`/sessions/${id}`)window.history.pushState(null,"",`/sessions/${id}`); }
   useEffect(()=>{
-    const restore=()=>{const match=window.location.pathname.match(/^\/sessions\/([^/]+)$/);setSelectedWork(match?.[1]??null);setCreatingWork(false);setPresentationView(null);setSelectedExperiment(null);if(match)selectTab("experiments");else{const view=new URLSearchParams(window.location.search).get("view");if(view&&workspaceTabs.includes(view as WorkspaceTab))selectTab(view as WorkspaceTab);}};
+    const restore=()=>{const match=window.location.pathname.match(/^\/sessions\/([^/]+)$/);setSelectedWork(match?.[1]??null);setCreatingWork(false);setPresentationView(null);setSelectedExperiment(null);if(match){selectTab("lab");setLabMode(true);}else{const params=new URLSearchParams(window.location.search);const view=params.get("view");if(params.get("mode")!=="lab"&&(!view||view==="performance"))setSelectedPolicyId("");setLabMode(params.get("mode")==="lab"||!!view&&!["performance","episodes"].includes(view));selectTab(view==="lab"?"lab":workspaceTabs.find(tab=>tab===view)??"performance");setSelectedExperiment(params.get("experiment"));}};
     window.addEventListener("popstate",restore);return()=>window.removeEventListener("popstate",restore);
   },[]);
-  function newWork() { if(recordingCoaching)return; setPresentationView(null); setSelectedExperiment(null); setSelectedWork(null); setCreatingWork(true); setActiveTab("experiments"); }
-  function inspectExperiment(id:string) { setSelectedExperiment(id);setSelectedWork(null);setCreatingWork(false);setActiveTab("experiments");setPresentationView(null); }
+  function newWork() { if(recordingCoaching)return; setPresentationView(null); setSelectedExperiment(null); setSelectedWork(null); setCreatingWork(true); setActiveTab("lab"); }
+  function labOverview() { setSelectedWork(null); setCreatingWork(false); setPresentationView(null); setActiveTab("lab"); }
+  function inspectExperiment(id:string) {
+    setSelectedExperiment(id); setSelectedWork(null); setCreatingWork(false); setPresentationView(null);
+    companion.presentation.manual(); setLabMode(true); selectTab("experiments");
+    const route = `/?view=experiments&experiment=${encodeURIComponent(id)}`;
+    if (`${window.location.pathname}${window.location.search}` !== route) window.history.pushState(null, "", route);
+  }
   function workOverview() { setSelectedExperiment(null); setSelectedWork(null); setCreatingWork(false); setActiveTab("experiments"); }
   useEffect(() => { if (subjectId) companion.presentation.restoreFor(subjectId); }, [subjectId, companion.presentation.restoreFor]);
   const [wikiPage,setWikiPage]=useState<WikiPage>('overview');
   const [wikiEntry,setWikiEntry]=useState<string|undefined>();
-  useEffect(() => { companion.presentation.setHuman({ tab: activeTab, wikiPage, entityId:wikiEntry??null, revision: currentRevision?.ir.update.revision ?? null, branch: branchId ?? null, cycleId: cycleId ?? null, outcomeLast, opponent: opponentFilter, replay: replayId || null }); }, [activeTab, wikiPage, wikiEntry, currentRevision?.ir.update.revision, branchId, cycleId, outcomeLast, opponentFilter, replayId, companion.presentation.setHuman]);
+  useEffect(() => { companion.presentation.setHuman({ mode: labMode ? "lab" : "workspace", tab: activeTab, wikiPage, entityId:wikiEntry??null, revision: currentRevision?.ir.update.revision ?? null, branch: branchId ?? null, cycleId: cycleId ?? null, outcomeLast, opponent: opponentFilter, replay: replayId || null }); }, [labMode, activeTab, wikiPage, wikiEntry, currentRevision?.ir.update.revision, branchId, cycleId, outcomeLast, opponentFilter, replayId, companion.presentation.setHuman]);
 
   const [presentationView,setPresentationView]=useState<WorkspaceView|null>(null);
   const [savedViews,setSavedViews]=useState<{id:string;title:string}[]>([]);
@@ -787,7 +817,9 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
   useEffect(()=>{setPresentationView(null);},[activeTab]);
   const openPresentation = useCallback((view: WorkspaceView) => {
     if (recordingCoaching) return;
-    window.history.replaceState(null, "", presentationRoute(view));
+    const inspect = !!view.revision || !!view.branchId || !!view.cycleId || new URLSearchParams(window.location.search).get("mode") === "lab" || view.view !== "performance";
+    setLabMode(inspect);
+    window.history.replaceState(null, "", presentationRoute(view) + (inspect && view.view !== "lab" ? "&mode=lab" : ""));
     if(view.view==="custom"){setOpenedViews(old=>[...old.filter(v=>v.artifactId!==view.artifactId),view]);setPresentationView(view);if(window.matchMedia("(max-width: 800px)").matches)closePresent();return;}
     setPresentationView(null);
     setOpponentPolicyId(view.opponentPolicyId);
@@ -806,45 +838,56 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
 
   const deepLinkApplied = useRef(false);
   useEffect(() => {
-    if (deepLinkApplied.current || !email || !workspace) return;
-    deepLinkApplied.current = true;
+    if (deepLinkApplied.current || !email) return;
     const p = new URLSearchParams(window.location.search);
+    if (p.has("revision") && !workspace) return;
+    deepLinkApplied.current = true;
     if (!p.has("view")) return;
     const result = viewSchema.safeParse({ view: p.get("view"), artifactId:p.get("artifact")??undefined, reason: "Opened from a workspace link", opponentPolicyId:p.get("opponentPolicy")??undefined,experimentId:p.get("experiment")??undefined, wikiPage:p.get("wiki")??undefined, entityId:p.get("entity")??undefined, revision: p.has("revision") ? Number(p.get("revision")) : undefined, branchId: p.get("branch") ?? undefined, cycleId: p.get("cycle") ?? undefined, opponent: p.get("opponent") ?? undefined, last: Number(p.get("last") ?? 10) });
-    if (result.success && (!result.data.revision || workspace.versions.some(v => v.revision === result.data.revision))) openPresentation(result.data);
+    if (result.success && (!result.data.revision || workspace?.versions.some(v => v.revision === result.data.revision))) openPresentation(result.data);
   }, [email, workspace, openPresentation]);
 
+  const recentRequests=[...requests.requests].sort((a,b)=>Number(b.pinned)-Number(a.pinned));
+  const requestLink=(r:typeof requests.requests[number])=><button key={r.id} onClick={()=>requests.open(r.id)} title={r.prompt}><span>{r.pinned?"Pinned":"Recent"}</span><strong>{r.prompt}</strong><span aria-hidden="true">↗</span></button>;
   const workspacePanel = <section className="preview-card" onPointerDownCapture={companion.presentation.manual} onKeyDownCapture={companion.presentation.manual} inert={compactScreen && (presentExpanded || chatOpen)}>
-          <div className="tabs" role="tablist" aria-label="Workspace views">
-            <div>{workspaceTabs.map(tab=><button key={tab} id={`tab-${tab}`} role="tab" aria-controls={`workspace-${tab}`} aria-selected={activeTab===tab} tabIndex={activeTab===tab?0:-1} className={activeTab===tab?"active":""} disabled={recordingCoaching} onClick={()=>{setPresentationView(null);setSelectedWork(null);setCreatingWork(false);setActiveTab(tab);}} onKeyDown={e=>{if(!["ArrowRight","ArrowLeft","Home","End"].includes(e.key))return;e.preventDefault();const i=workspaceTabs.indexOf(tab);const next=e.key==="Home"?0:e.key==="End"?workspaceTabs.length-1:(i+(e.key==="ArrowRight"?1:workspaceTabs.length-1))%workspaceTabs.length;setSelectedWork(null);setCreatingWork(false);setPresentationView(null);setActiveTab(workspaceTabs[next]);document.getElementById(`tab-${workspaceTabs[next]}`)?.focus();}}>{tab[0].toUpperCase()+tab.slice(1)}</button>)}</div>
+          <div className="tabs" role="tablist" aria-label="Lab views" hidden={!labMode}>
+            <div>{labTabs.map(tab=><button key={tab} id={`tab-${tab}`} role="tab" aria-controls={`workspace-${tab}`} aria-selected={activeTab===tab} tabIndex={activeTab===tab?0:-1} className={activeTab===tab?"active":""} disabled={recordingCoaching} onClick={()=>{setPresentationView(null);setSelectedWork(null);setCreatingWork(false);setActiveTab(tab,"lab");}} onKeyDown={e=>{if(!["ArrowRight","ArrowLeft","Home","End"].includes(e.key))return;e.preventDefault();const i=labTabs.indexOf(tab);const next=e.key==="Home"?0:e.key==="End"?labTabs.length-1:(i+(e.key==="ArrowRight"?1:labTabs.length-1))%labTabs.length;setSelectedWork(null);setCreatingWork(false);setPresentationView(null);setActiveTab(labTabs[next],"lab");document.getElementById(`tab-${labTabs[next]}`)?.focus();}}>{tab==="lab"?"Research":tab[0].toUpperCase()+tab.slice(1)}</button>)}</div>
             <span className="league-status"><button type="button" className="notice-button" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`} aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen(!notificationsOpen); if (!notificationsOpen) { track(events.updatesOpened, { unread }); markNoticesRead(); } }}>Updates{unread ? <b>{unread > 9 ? "9+" : unread}</b> : null}</button>{defaultPlayer ? <span className="player-label" title="The Softmax player your uploads and league entries are credited to">Player <b>{defaultPlayer}</b></span> : null}<span className="sync-label">{arena ? arena.league.rounds_paused_at ? "Rounds paused" : "Rounds live" : "Connecting…"}<span className="live-indicator" /></span><a className="league-link" href={league.url} target="_blank" rel="noreferrer">League ↗</a></span>
           </div>
-          {extraViews.length ? <div className="generated-view-tabs" role="tablist" aria-label="Additional views">
-            <button role="tab" aria-selected={!presentationView} aria-controls={`workspace-${activeTab}`} onClick={()=>setPresentationView(null)}>Workspace</button>
+          {workspaceError ? <p className="league-data-note" role="status">{workspaceError} {workspace ? "Showing the last loaded data. " : ""}<button className="text-button" onClick={() => setWorkspaceKey(key => key + 1)}>Retry workspace</button></p> : null}
+          {extraViews.length && labMode ? <div className="generated-view-tabs" role="tablist" aria-label="Additional views">
+            <button role="tab" aria-selected={!presentationView} aria-controls={`workspace-${activeTab}`} onClick={()=>setPresentationView(null)}>Current view</button>
             {extraViews.map(v=><button key={viewKey(v)} id={`extra-${encodeURIComponent(viewKey(v))}`} role="tab" aria-selected={!!presentationView&&viewKey(presentationView)===viewKey(v)} aria-controls="generated-view-panel" title={v.reason} onClick={()=>setPresentationView(v)}>{v.view==="custom" ? savedViews.find(s=>s.id===v.artifactId)?.title ?? v.reason : `${v.view[0].toUpperCase()+v.view.slice(1)}${v.opponent?` · ${v.opponent}`:v.revision?` · r${v.revision}`:" · Preston"}`}</button>)}
           </div> : null}
           {presentationView?<div id="generated-view-panel" role="tabpanel" aria-labelledby={`extra-${encodeURIComponent(viewKey(presentationView))}`}><PresentationPane key={viewKey(presentationView)} view={presentationView} onOpen={openPresentation}/></div>:null}
-          {notificationsOpen ? <div className="notice-panel" role="region" aria-label="Policy updates"><div className="notice-panel-head"><strong>Policy updates</strong><button type="button" className="text-button" onClick={() => setNotificationsOpen(false)}>Close ×</button></div>{notices.length ? notices.map((notice) => <div key={notice.id} className={`notice-row ${notice.kind}`}><b>{notice.title}</b><span>{notice.detail}</span><small>{new Date(notice.at).toLocaleString()}</small></div>) : <p className="muted">Your saves, uploads, and hosted game results appear here.</p>}</div> : null}
+          {labMode && notificationsOpen ? <div className="notice-panel" role="region" aria-label="Policy updates"><div className="notice-panel-head"><strong>Policy updates</strong><button type="button" className="text-button" onClick={() => setNotificationsOpen(false)}>Close ×</button></div>{notices.length ? notices.map((notice) => <div key={notice.id} className={`notice-row ${notice.kind}`}><b>{notice.title}</b><span>{notice.detail}</span><small>{new Date(notice.at).toLocaleString()}</small></div>) : <p className="muted">Your saves, uploads, and hosted game results appear here.</p>}</div> : null}
           <div className="workspace-tab" id="workspace-performance" role="tabpanel" aria-labelledby="tab-performance" hidden={!!presentationView || activeTab !== "performance"}><div className="episodes-view">
-            <div className="league-overview-heading"><div><h2>Performance</h2><p>{activeStanding?.player_name ?? activePlayer ?? "Your player"} · {activePolicyId ? policyLabel(activePolicyId) : "No policy selected"}</p></div><div><button className="text-button" onClick={()=>setRefreshKey(k=>k+1)}>Refresh</button><a href={league.url} target="_blank" rel="noreferrer">League ↗</a></div></div>
-            <PerformanceOverview standings={policyStats?.standings ?? []} activePlayerId={activePlayerId} leagueName={league.name} loading={!policyStats && !policyStatsError} record={activeRecord} />
+            {labMode?<div className="league-overview-heading"><h2>Performance</h2><button className="text-button" onClick={()=>setRefreshKey(k=>k+1)}>Refresh</button></div>:null}
+            <div hidden={labMode||activeTab!=="performance"||!!presentationView}><WorkspaceComposer key={`${subjectId}:${league.id}`} settings={chatSettings} disabled={recordingCoaching||presentBusy} onRequest={(id,text,mode)=>{setChatOpen(false);setPresentExpanded(false);requests.start(id,text,mode,activePolicyId);}}/>{requests.requests.length?<nav className="workspace-recent-requests" aria-label="Recent requests">{recentRequests.slice(0,3).map(requestLink)}{recentRequests.length>3?<details className="workspace-request-history"><summary>All requests ({recentRequests.length})</summary><div>{recentRequests.slice(3).map(requestLink)}</div></details>:null}</nav>:null}</div>
+            {!labMode&&activeTab==="performance"&&!presentationView?<CoachingHome standings={policyStats?.standings??[]} activePlayerId={activePlayerId} activePolicyId={activePolicyId} currentPolicyLabel={currentLeaguePolicyId?policyLabel(currentLeaguePolicyId):""} record={activeRecord}
+              loading={!policyStats&&!policyStatsError} stale={!!policyStatsError||!!leagueRecordError||!!leagueError||!!workspaceError} replayLoading={!leagueReady&&!leagueError||!arena&&!arenaError} replayError={leagueError||arenaError}
+              replays={[...leagueRows.filter(e=>e.status==="completed"&&!!e.replay_url).map(e=>({id:e.id,episodeId:e.episode_id,label:`League round #${e.round.number}`,kind:"league" as const,outcome:e.outcome,createdAt:e.created_at,opponents:leagueAgainst(e)})),...episodes.filter(e=>e.status==="completed"&&!!e.replay_url&&(!activePolicyId||e.scores.some(score=>score.policy_version_id===activePolicyId))).map(e=>({id:e.id,episodeId:e.episode_id,label:e.run_title??"Practice game",kind:"practice" as const,outcome:null,createdAt:e.created_at,opponents:""}))]}
+              sessions={coaching} coachingLoaded={coachingLoaded} coachingError={coachingError} tasks={taskFeed.tasks} onInspectTask={selectWork} onDiscuss={(text,context)=>setAnalysisRequest({id:Date.now(),text,context})} onRefresh={()=>setRefreshKey(key=>key+1)}
+              onReplay={replay=>{if(replay.kind==="league"){const episode=leagueRows.find(e=>e.id===replay.id);if(episode)openLeagueEpisode(episode);}else{const episode=episodes.find(e=>e.id===replay.id);if(episode)openReference({kind:"replay-note",episodeId:episode.id,runId:episode.run_id,label:replay.label});}}}/>:null}
+            {labMode?<section aria-label="Performance details">
             <div className="league-data-note">{policyStatsError || leagueRecordError || leagueError ? "Some results could not refresh. Displayed data may be out of date." : policyStats?.checkedAt ? `Updated ${new Date(policyStats.checkedAt).toLocaleTimeString()} · MMR belongs to the player across policy versions.` : "Loading live league data…"}</div>
             <div className="performance-filters"><SelectField aria-label="Choose policy version" value={selectedPolicyId} disabled={recordingCoaching} onValueChange={setSelectedPolicyId} options={policyVersionOptions.map(o=>({...o,label:o.label.replace(" · all practice games","")}))}/><label>Episodes <SelectField aria-label="Outcome window" value={String(outcomeLast)} onValueChange={v=>setOutcomeLast(Number(v) as 10|25|50)} options={[10,25,50].map(n=>({value:String(n),label:`Last ${n}`}))}/></label><Input className="text-xs" aria-label="Opponent filter" value={opponentFilter} onChange={e=>setOpponentFilter(e.target.value)} placeholder="Filter opponents"/></div>
             <PerformanceEvidence standings={policyStats?.standings ?? []} ownPlayerIds={ownPlayerIds} activePlayerId={activePlayerId} rounds={leagueRows} last={outcomeLast} opponent={opponentFilter} error={leagueError} loading={(!policyStats && !policyStatsError) || (!!leaguePolicyId && !leagueReady && !leagueError)} onRound={id=>{const round=leagueRows.find(r=>r.id===id);if(round)openLeagueEpisode(round);}}/>
+            </section>:null}
           </div></div>
           <div className="workspace-tab" id="workspace-episodes" role="tabpanel" aria-labelledby="tab-episodes" hidden={!!presentationView || activeTab !== "episodes"}><div className="episodes-view compact-episodes">
-            <div className="episode-toolbar"><h2>Episodes</h2><SelectField aria-label="Episodes policy version" value={selectedPolicyId} disabled={recordingCoaching} onValueChange={id=>{setSelectedPolicyId(id);setSelectedEpisodeId("");setLeagueSelection(null);setViewer(null);}} options={policyVersionOptions}/></div>
+            <div className="episode-toolbar">{!labMode?<button className="text-button" disabled={recordingCoaching} onClick={()=>setActiveTab("performance")}>← Back</button>:null}<h2>{labMode?"Episodes":"Coach this replay"}</h2>{labMode?<SelectField aria-label="Episodes policy version" value={selectedPolicyId} disabled={recordingCoaching} onValueChange={id=>{setSelectedPolicyId(id);setSelectedEpisodeId("");setLeagueSelection(null);setViewer(null);}} options={policyVersionOptions}/>:null}</div>
             {leagueSelection ? <section ref={replayPanelRef} className="replay-panel" aria-label="Selected league replay">
               <div className="replay-head"><div><span className="eyebrow">League replay{selectedLeagueEpisode?.outcome ? ` · ${leagueOutcomeLabel[selectedLeagueEpisode.outcome]}` : ""}</span><strong>{leagueSelection.label}</strong></div>
                 <div className="replay-head-actions">
                   <button className="text-button" onClick={toggleFullscreen} aria-pressed={fullscreen}>{fullscreen ? "Exit full screen" : "Full screen ⤢"}</button>
-                  <button className="text-button" disabled={recordingCoaching} onClick={() => { setLeagueSelection(null); setViewer(null); setReplayError(""); }}>Close ×</button></div></div>
+                  <button className="text-button" disabled={recordingCoaching} onClick={() => { setLeagueSelection(null); setViewer(null); setReplayError(""); if(!labMode)setActiveTab("performance"); }}>Close ×</button></div></div>
               {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && viewer.episodeId ? <ReplayCoaching key={leagueSelection.id} episode={{id:leagueSelection.id,episode_id:viewer.episodeId,policyVersionId:leagueSelection.policyVersionId,seats:selectedLeagueEpisode?.seats}} sessions={coaching.filter(item=>item.episode_id===viewer.episodeId)} onSaved={()=>setRefreshKey(key=>key+1)} onDiscuss={session=>discussCoaching(session)} onOpenSession={selectWork} onRecordingChange={setRecordingCoaching} replay={<ReplayFrame episodeId={leagueSelection.id} versionId={workspace?.versions.find(v => v.policyVersionId === leaguePolicyId)?.id} src={viewer.url} title={`Replay for ${leagueSelection.label}`} />}/> : viewer?.ready ? <ReplayFrame episodeId={leagueSelection.id} versionId={workspace?.versions.find(v => v.policyVersionId === leaguePolicyId)?.id} src={viewer.url} title={`Replay for ${leagueSelection.label}`} /> : <div className="replay-state">Starting replay…</div>}
               <div className="replay-footer">
                 <a href={`https://softmax.com/observatory/v2/episode-requests/${leagueSelection.id}/watch`} target="_blank" rel="noreferrer">Open on Softmax ↗</a>
                 {selectedLeagueEpisode ? <span title={leagueRoster(selectedLeagueEpisode)}>{selectedLeagueEpisode.side ? `Your heroes: ${selectedLeagueEpisode.side} side, seat${selectedLeagueEpisode.seats.length === 1 ? "" : "s"} ${selectedLeagueEpisode.seats.map((seat) => seat + 1).join(", ")}` : ""}</span> : null}
               </div>
-              {matchStatsBlock}
+              {labMode?matchStatsBlock:null}
               {!coachingAvailable || !viewer?.episodeId ? <div className="replay-note-box"><label htmlFor="league-replay-note">Notice something?</label>
                 <div><Textarea className="text-xs" id="league-replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero retreated too early…" />
                   <button className="secondary" disabled={!replayNote.trim()} onClick={discussLeagueReplay}>Discuss in chat ↗</button></div></div>:null}
@@ -853,7 +896,7 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
               <div className="replay-head"><div><span className="eyebrow">Replay · #{(selectedEpisode.job_index ?? 0) + 1}</span><strong>{selectedEpisode.run_title || "Hosted game"}</strong></div>
                 <div className="replay-head-actions">
                   <button className="text-button" onClick={toggleFullscreen} aria-pressed={fullscreen}>{fullscreen ? "Exit full screen" : "Full screen ⤢"}</button>
-                  <button className="text-button" disabled={recordingCoaching} onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); }}>Close ×</button></div></div>
+                  <button className="text-button" disabled={recordingCoaching} onClick={() => { setSelectedEpisodeId(""); setViewer(null); setReplayError(""); if(!labMode)setActiveTab("performance"); }}>Close ×</button></div></div>
               {replayError ? <div className="replay-state error">{replayError}</div> : viewer?.ready && coachingAvailable && selectedEpisode.episode_id ? <ReplayCoaching key={selectedEpisode.id} episode={selectedEpisode} sessions={coaching.filter((item) => item.episode_id === selectedEpisode.episode_id)} onSaved={() => setRefreshKey((key) => key + 1)} onDiscuss={(session) => discussCoaching(session)} onOpenSession={selectWork} onRecordingChange={setRecordingCoaching} focusSessionId={focusCoachingId} replay={<ReplayFrame episodeId={selectedEpisode.id} versionId={workspace?.versions.find(v => selectedEpisode.scores.some(score => score.policy_version_id === v.policyVersionId))?.id} src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} />} /> : viewer?.ready ? <ReplayFrame episodeId={selectedEpisode.id} versionId={workspace?.versions.find(v => selectedEpisode.scores.some(score => score.policy_version_id === v.policyVersionId))?.id} src={viewer.url} title={`Replay for episode ${(selectedEpisode.job_index ?? 0) + 1}`} /> : <div className="replay-state">{selectedEpisode.replay_url ? "Starting replay…" : "Replay is not available yet."}</div>}
               <div className="replay-footer">
                 <a href={`https://softmax.com/observatory/v2/episode-requests/${selectedEpisode.id}/watch`} target="_blank" rel="noreferrer">Open on Softmax ↗</a>
@@ -861,11 +904,12 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
                 {selectedCoaching?.latest_analysis?.status === "complete" && !viewer?.ready ? <button className="text-button" onClick={() => discussCoaching(selectedCoaching)}>Discuss coaching ↗</button> : null}
                 {coachingError ? <span className="error">{coachingError}</span> : null}
               </div>
-              {matchStatsBlock}
+              {labMode?matchStatsBlock:null}
               {!coachingAvailable ? <div className="replay-note-box"><label htmlFor="replay-note">Notice something?</label>
                 <div><Textarea className="text-xs" id="replay-note" value={replayNote} onChange={(event) => setReplayNote(event.target.value.slice(0, 1200))} placeholder="At 01:20, my hero retreated too early…" />
                   <button className="secondary" disabled={!replayNote.trim()} onClick={() => discussReplay(selectedEpisode)}>Discuss in chat ↗</button></div></div> : null}
             </section> : null}
+            {labMode?<>
             <div className="match-views">
               <div role="tablist" aria-label="Kind of match">
                 <button type="button" role="tab" aria-selected={view === "league"} className={view === "league" ? "active" : ""} disabled={recordingCoaching} onClick={() => { setMatchView("league"); track(events.tabViewed, { tab: "league-rounds" }); }}>League rounds <span>{leaguePolicyId ? leagueReady ? `${leagueRows.length}${leagueFeed?.nextCursor ? "+" : ""}` : "…" : 0}</span></button>
@@ -914,9 +958,16 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
                   </tr>;
                 })}</tbody></table>{!sortedEpisodes.length ? <div className="empty-games">No practice games for this policy version yet.</div> : null}</div>}
             </>}
+            </>:null}
           </div></div>
           <div className="workspace-tab" id="workspace-strategy" role="tabpanel" aria-labelledby="tab-strategy" hidden={!!presentationView || activeTab !== "strategy"}><div className="strategy-view"><div className="strategy-version-select"><label>Policy revision <SelectField aria-label="Strategy revision" value={viewRevision === null ? "" : String(viewRevision)} onValueChange={v=>setViewRevision(v ? Number(v) : null)} options={[{value:"",label:"Latest saved policy"},...(workspace?.versions.map(v=>({value:String(v.revision),label:`r${v.revision} · ${v.summary}`})) ?? [])]}/></label></div>{currentRevision ? <StrategyOverview revision={currentRevision} branchId={branchId} onSource={id=>{setBranchId(id);setWikiPage("source");setActiveTab("development");}} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})}/> : <p>Loading the policy…</p>}<div className="strategy-knowledge-link"><h3>Beliefs and disagreements</h3><p>Inspect our hypotheses, their evidence, and where our views differ.</p><button className="secondary" onClick={()=>{setWikiPage("beliefs");setActiveTab("development");}}>Open shared knowledge ↗</button></div></div></div>
-          <div className="workspace-tab" id="workspace-experiments" role="tabpanel" aria-labelledby="tab-experiments" hidden={!!presentationView || activeTab !== "experiments"}><div className="experiments-view">{selectedExperiment ? <ExperimentDetail key={selectedExperiment} id={selectedExperiment} onBack={workOverview} onVersion={revision=>{setViewRevision(revision);setWikiPage("evidence");setActiveTab("development");}} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})} onReplay={(episodeId,runId)=>openReference({kind:"replay-note",episodeId,runId,label:"Experiment result"})}/> : selectedWork || creatingWork ? <><button className="text-button" onClick={workOverview}>← Experiments</button><TaskPanel feed={taskFeed} selectedId={selectedWork} creating={creatingWork} onSelect={selectWork} onNew={newWork} onCloseNew={workOverview} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})}/></> : <ExperimentTable feed={taskFeed} cycleId={cycleId} onTask={selectWork} onVersion={revision=>{setViewRevision(revision);setActiveTab("strategy");}} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})} onInspect={inspectExperiment} onExperiment={id=>{const episode=episodes.find(e=>e.run_id===id);if(episode?.replay_url)openReference({kind:"replay-note",episodeId:episode.id,runId:id,label:"Experiment result"});else inspectExperiment(id);}}/>}</div></div>
+          <div className="workspace-tab" id="workspace-experiments" role="tabpanel" aria-labelledby="tab-experiments" hidden={!!presentationView || activeTab !== "experiments"}><div className="experiments-view">{selectedExperiment ? <ExperimentDetail key={selectedExperiment} id={selectedExperiment} onBack={workOverview} onVersion={revision=>{setViewRevision(revision);setWikiPage("evidence");setActiveTab("development");}} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})} onReplay={(episodeId,runId)=>openReference({kind:"replay-note",episodeId,runId,label:"Experiment result"})}/> : <ExperimentResults experiments={workspace?.experiments??[]} loading={!workspace&&!workspaceError} error={workspaceError} onInspect={inspectExperiment} onLab={labOverview}/>}</div></div>
+          {activeTab==="lab"&&!presentationView ? <section id="workspace-lab" className="preston-lab" role="tabpanel" aria-label="Preston’s Lab">
+            <header className="lab-heading"><div><span className="eyebrow">PRESTON’S WORKSPACE</span><h2>Inside the Lab</h2><p>Follow the research, inspect workers, and steer what happens next.</p></div><button className="secondary" disabled={recordingCoaching} onClick={newWork}>New campaign +</button></header>
+            <div className="lab-layout"><aside className="lab-sessions"><button className="lab-overview-link" aria-pressed={!selectedWork&&!creatingWork} onClick={labOverview}>Research overview</button><SessionRail feed={taskFeed} selected={selectedWork} onSelect={selectWork} onNew={newWork}/></aside>
+              <div className="lab-content">{selectedWork||creatingWork ? <><button className="text-button lab-back" onClick={labOverview}>← Research overview</button><TaskPanel feed={taskFeed} selectedId={selectedWork} creating={creatingWork} onSelect={selectWork} onNew={newWork} onCloseNew={labOverview} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})}/></> : <ExperimentTable feed={taskFeed} enabled={!selectedWork&&!creatingWork} cycleId={cycleId} onTask={selectWork} onVersion={revision=>{setViewRevision(revision);setActiveTab("strategy");}} onDiscuss={text=>setAnalysisRequest({id:Date.now(),text})} onInspect={inspectExperiment} onExperiment={id=>{const episode=episodes.find(e=>e.run_id===id);if(episode?.replay_url)openReference({kind:"replay-note",episodeId:episode.id,runId:id,label:"Experiment result"});else inspectExperiment(id);}}/>}</div>
+            </div>
+          </section> : null}
           <div className="workspace-tab" id="workspace-opponents" role="tabpanel" aria-labelledby="tab-opponents" hidden={!!presentationView||activeTab!=="opponents"}>{activeTab==="opponents"?<Opponents initialPolicyId={opponentPolicyId} onSelect={setOpponentPolicyId} onSession={setAnalysisRequest} onOpenTask={selectWork}/>:null}</div>
           <div className="workspace-tab" id="workspace-development" role="tabpanel" aria-labelledby="tab-development" hidden={!!presentationView || activeTab !== "development"}>
             <PolicyWiki revision={currentRevision} page={wikiPage} onPage={setWikiPage} entryId={wikiEntry} onEntry={setWikiEntry} branchId={branchId} onBranch={setBranchId}
@@ -956,7 +1007,7 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
 
         </section>;
 
-  return <main className={`shell${email ? ` signed-in partner-shell${chatOpen ? " chat-open" : ""}` : ""}`}>
+  return <><main inert={requests.isOpen} className={`shell${email ? ` signed-in partner-shell${chatOpen ? " chat-open" : ""}` : ""}`}>
     {toast ? <div className={`app-toast ${toast.kind}`} role="status"><b>{toast.title}</b><span>{toast.detail}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast(null)}>×</button></div> : null}
     {!email ? <header className="topbar">
       <a className="brand" href="/">Softmax</a>
@@ -981,22 +1032,29 @@ function StudentWorkspace({ league, initialTaskId }: { league: League; initialTa
           {error ? <p className="error">{error}</p> : null}
         </form>
       </section> : <>
-        <header className="partner-header" inert={compactScreen && (presentExpanded || chatOpen)}><div className="partner-brand"><a href="/">Softmax</a><GamePicker leagueName={league.name} onSelect={()=>setActiveTab("performance")} disabled={recordingCoaching} /></div>
+        <header className="partner-header" inert={compactScreen && (presentExpanded || chatOpen)}><div className="partner-brand"><a href="/">Softmax</a><GamePicker leagueName={league.name} onSelect={()=>setActiveTab("performance")} disabled={recordingCoaching} /></div><nav className="workspace-mode-switch" aria-label="Workspace mode">
+          <button type="button" aria-pressed={!labMode} disabled={recordingCoaching} onClick={()=>{setPresentationView(null);setSelectedPolicyId("");setActiveTab("performance");}}>Workspace</button>
+          <button type="button" aria-pressed={labMode} disabled={recordingCoaching} onClick={()=>{if(selectedWork)selectWork(selectedWork);else{setPresentationView(null);setActiveTab("lab");}}}>Preston’s Lab</button>
+        </nav><AccountMenu name={preferredName || accountName?.trim() || defaultPlayer || email.split("@")[0]} email={email} disabled={recordingCoaching} onSignOut={signOut} />
         </header>
         <div className={`partner-body${chatOpen ? " chat-open" : ""}`}>
-          <div className="game-status-rail" inert={compactScreen && (presentExpanded || chatOpen)}><SessionRail feed={taskFeed} selected={selectedWork} onSelect={selectWork} onNew={newWork}/><details className="sidebar-league-status"><summary>League status</summary><GameStatus record={activeRecord} standing={activeStanding} recent={leagueRows} policy={activePolicyId ? policyLabel(activePolicyId) : null} entered={entered.has(activePolicyId)} loaded={policyStats !== null && (!leaguePolicyId || activeRecord !== null)} error={!!policyStatsError || !!leagueError || !!leagueRecordError} paused={arena ? !!arena.league.rounds_paused_at : null} disabled={recordingCoaching} onMatches={() => { setActiveTab("episodes"); setMatchView("league"); }} onRound={id => { setActiveTab("episodes"); setMatchView("league"); const round = leagueRows.find(r => r.id === id); if (round) openLeagueEpisode(round); }} /></details><AccountMenu name={preferredName || accountName?.trim() || defaultPlayer || email.split("@")[0]} email={email} disabled={recordingCoaching} onSignOut={signOut} /></div>
+
           {workspacePanel}
         </div>
           <PresentPanel expanded={presentExpanded || chatOpen} busy={presentBusy} activity={presentActivity} feed={taskFeed} waiting={pendingExperiments.length}
-            navigationDisabled={recordingCoaching} onClose={closePresent} onOpenSession={selectWork} currentView={activeTab} typingOpen={chatOpen}
-            onType={()=>{setChatOpen(open=>!open);if(!chatOpen)requestAnimationFrame(()=>chatDock.current?.querySelector<HTMLTextAreaElement>("textarea.aui-composer-input")?.focus());}} onHistory={()=>{setChatOpen(true);window.dispatchEvent(new Event("preston-history-open"));}}
-            onPrompt={text=>{setChatOpen(true);window.dispatchEvent(new Event("preston-history-close"));window.dispatchEvent(new CustomEvent("preston-prompt",{detail:text}));}}>
-          <div ref={chatDock} id="present-chat" className="partner-chat" data-composer-open={chatOpen}>
-            <Chat key={email} onNeedsInput={openTextChat} onPresence={updatePresence} onActivity={onActivity} onNotice={onChatNotice} onOpenReference={openReference} analysisRequest={analysisRequest} suggestions={[]} starterPrompt={starterPrompt} recordingCoaching={recordingCoaching} playerName={defaultPlayer} />
+            navigationDisabled={recordingCoaching} onClose={closePresent} onOpenSession={selectWork} currentView={activeTab} labMode={labMode} typingOpen={chatOpen}
+            onType={()=>{setChatOpen(open=>!open);if(!chatOpen)requestAnimationFrame(()=>chatDock.current?.querySelector<HTMLTextAreaElement>("textarea.aui-composer-input")?.focus());}} onHistory={()=>{setChatAction({id:Date.now(),kind:"history"});setChatOpen(true);}}
+            onPrompt={text=>{setChatAction({id:Date.now(),kind:"prompt",text});setChatOpen(true);}}>
+          <div ref={chatDock} id="present-chat" className="partner-chat" hidden={!chatOpen} data-composer-open={chatOpen}>
+            {/* Hidden chat streams must release HTTP connections. Activity preserves drafts
+                and Eve state while detaching effects; durable agent work keeps running. */}
+            <Activity mode={companion.phase!=="off"||(chatOpen&&pageVisible&&!requests.isOpen)?"visible":"hidden"}>
+              <Chat key={email} action={chatAction} settings={chatSettings} onNeedsInput={openTextChat} onPresence={updatePresence} onActivity={onActivity} onNotice={onChatNotice} onOpenReference={openReference} analysisRequest={analysisRequest} suggestions={[]} starterPrompt={starterPrompt} recordingCoaching={recordingCoaching} playerName={defaultPlayer} />
+            </Activity>
           </div>
           </PresentPanel>
           <button id="present-panel-toggle" className="preston-mobile-launcher" type="button" hidden={presentExpanded || chatOpen} aria-label="Open Preston" aria-controls="present-panel" aria-expanded={false} onClick={() => setPresentExpanded(true)}><img src="/preston/preston-kindred-wisp.webp" width={52} height={52} alt="" /></button>
       </>}
 
-  </main>;
+  </main><Activity mode={requests.isOpen&&pageVisible?"visible":"hidden"}>{email&&requests.current?<RequestWorkspace key={`${subjectId}:${league.id}:${requests.current.id}`} request={requests.current} leagueId={league.id} leagueName={league.name} settings={chatSettings} feed={taskFeed} visible={requests.isOpen} onUpdate={requests.update} onClose={requests.close} onLab={id=>{requests.close();if(id)selectWork(id);else labOverview();}}/>:null}</Activity></>;
 }

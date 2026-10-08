@@ -4,6 +4,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, NotebookText } from "lucide-react";
 import type { OpponentNotebook, OpponentProfile, OpponentResearchStatus } from "../../lib/opponents/model";
 import { OpponentModel } from "./opponent-model";
+import { pollWhileVisible } from "../../lib/browser-poll";
 
 export function OpponentRow({ profile, researchStatus, base, tick, collectedAt, live, researchButton, onProfile, onOpenTask }: {
   profile: OpponentProfile; researchStatus?: OpponentResearchStatus; base: string; tick: number; collectedAt?: string; live: boolean;
@@ -20,16 +21,13 @@ export function OpponentRow({ profile, researchStatus, base, tick, collectedAt, 
 
   useEffect(() => {
     if (!expanded) return;
-    const abort = new AbortController();
     setError("");
-    void fetch(`${base}&policy=${encodeURIComponent(profile.policyId)}`, { signal: abort.signal })
-      .then(async response => {
-        if (!response.ok) throw Error("Could not load this opponent’s analysis.");
-        const result: OpponentNotebook = await response.json();
-        if (!abort.signal.aborted) setBook(result);
-      })
-      .catch(cause => { if (!abort.signal.aborted) setError(cause.message); });
-    return () => abort.abort();
+    return pollWhileVisible(async signal => {
+      const response = await fetch(`${base}&policy=${encodeURIComponent(profile.policyId)}`, { signal });
+      if (!response.ok) throw Error("Could not load this opponent’s analysis.");
+      const result: OpponentNotebook = await response.json();
+      if (!signal.aborted) { setBook(result); setError(""); }
+    }, cause => setError(cause.message));
   }, [expanded, base, profile.policyId, tick, retry]);
 
   const model = book?.models?.[0];
@@ -62,7 +60,7 @@ export function OpponentRow({ profile, researchStatus, base, tick, collectedAt, 
             {model ? <div className="opponent-analysis-summary"><small>Observational model · {model.actor === "preston" ? "Preston" : "You"} · {new Date(model.created_at).toLocaleString()}</small><p>{model.document.summary}</p><details><summary>Explore semantic model & evidence</summary><OpponentModel models={book.models} snapshots={book.snapshots} /></details></div> : null}
             {notes.length ? <div className="opponent-inline-notes"><h4>Observations & hypotheses <span>{notes.length}</span></h4>{(showAllNotes ? notes : notes.slice(0, 3)).map(note => <article key={note.id}><small><span className={`opponent-note-kind ${note.kind}`}>{note.kind}</span> · {note.actor === "preston" ? "Preston" : "You"} · {new Date(note.created_at).toLocaleString()}</small><p>{note.text}</p><div className="opponent-note-links">{note.evidence.map((evidence, index) => <a key={index} href={evidence.url} target="_blank" rel="noreferrer">{evidence.label} ↗</a>)}</div></article>)}{notes.length > 3 ? <button className="text-button" onClick={() => setShowAllNotes(value => !value)} aria-expanded={showAllNotes}>{showAllNotes ? "Show fewer notes" : `Show all ${notes.length} notes`}</button> : null}</div> : null}
             {!hasAnalysis ? <div className="opponent-analysis-empty"><NotebookText size={23} aria-hidden="true" /><div><strong>{activeTasks.length ? "Analysis is in progress" : "No saved analysis yet"}</strong><p>{activeTasks.length ? "Saved findings will appear here as the research session progresses." : book.snapshots.length ? "Evidence has been collected. Choose Analyze to turn it into observations and hypotheses." : "Choose Analyze to research this policy and save findings here."}</p></div></div> : null}
-            {book.tasks?.length ? <div className="opponent-inline-sessions"><h4>Recent research sessions</h4>{book.tasks.slice(0, 3).map(task => <div key={task.id}><button className="text-button" disabled={!onOpenTask} onClick={() => onOpenTask?.(task.id)}>{task.context?.title ?? task.objective.split("\n")[0]} ↗</button><span>{task.status.replaceAll("_", " ")}</span></div>)}</div> : null}
+            {book.tasks?.length ? <div className="opponent-inline-sessions"><button className="text-button" disabled={!onOpenTask} onClick={() => onOpenTask?.(book.tasks![0].id)}>Inspect research in Lab ↗</button></div> : null}
           </> : null}
         </section> : null}
       </td>

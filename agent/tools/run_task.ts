@@ -6,8 +6,11 @@ import { campaignContext,adoptCampaign } from '../lib/tasks/campaign-steps';
 import { candidateProposalSchema } from '../../lib/campaigns/candidate-schema';
 import { taskErrorMessage } from '../../lib/tasks/failure';
 
+import { humanSummarySchema } from "../../lib/tasks/report-schema";
+import { humanCommunicationInstructions } from "../../lib/tasks/communication";
+
 const selectionSchema = z.object({ selected: z.number().int().min(-1).max(1), reason: z.string().min(8).max(2000) });
-const evaluationSchema = z.object({ satisfied: z.boolean(), summary: z.string().min(8).max(4000), evidence: z.array(z.string()).min(1).max(20), needsInput: z.string().max(2000) });
+const evaluationSchema = z.object({ satisfied: z.boolean(), humanSummary: humanSummarySchema.optional(), summary: z.string().min(8).max(4000), evidence: z.array(z.string()).min(1).max(20), needsInput: z.string().max(2000) });
 
 export default defineWorkflowTool({
   availableInSubagents: false,
@@ -23,7 +26,7 @@ export default defineWorkflowTool({
       if(task.context?.role==='candidate'&&task.context.campaignId){
         const key=`candidate:${task.generation}`;
         const cached=await workerState(task_id,execution,key,'Candidate synthesis');
-        const result=candidateProposalSchema.parse(cached??await ctx.agent('campaign_builder',{message:JSON.stringify(await campaignContext(task_id,execution)),outputSchema:z.toJSONSchema(candidateProposalSchema) as NonNullable<AgentInput['outputSchema']>}));
+        const result=candidateProposalSchema.parse(cached??await ctx.agent('campaign_builder',{message:JSON.stringify({...(await campaignContext(task_id,execution)),reportingInstructions:humanCommunicationInstructions}),outputSchema:z.toJSONSchema(candidateProposalSchema.required({humanSummary:true})) as NonNullable<AgentInput['outputSchema']>}));
         await workerState(task_id,execution,key,'Candidate synthesis',result);
         return advance(task_id,execution,'done',{},'completed',null,result);
       }
@@ -39,11 +42,11 @@ export default defineWorkflowTool({
         if(task.status!=="running")return task;
       }
       if (task.kind === "research") {
-        const schema=z.object({status:z.enum(["completed","needs_input"]),summary:z.string().min(1).max(8000),evidence:z.array(z.string().max(1500)).max(40),unknowns:z.array(z.string().max(2000)).max(20)});
+        const schema=z.object({status:z.enum(["completed","needs_input"]),humanSummary:humanSummarySchema.optional(),summary:z.string().min(1).max(8000),evidence:z.array(z.string().max(1500)).max(40),unknowns:z.array(z.string().max(2000)).max(20)});
         const key=`research:${task.generation}`;
         const cached=await workerState(task_id,execution,key,"Researcher");
         const shared=task.context?.campaignId?await campaignContext(task_id,execution):undefined;
-        const result=schema.parse(cached ?? await ctx.agent("background_research",{message:JSON.stringify({objective:task.objective,acceptanceCriteria:task.acceptance_criteria,context:task.context,checkpoint:task.checkpoint,shared}),outputSchema:z.toJSONSchema(schema) as NonNullable<AgentInput["outputSchema"]>}));
+        const result=schema.parse(cached ?? await ctx.agent("background_research",{message:JSON.stringify({reportingInstructions:humanCommunicationInstructions,objective:task.objective,acceptanceCriteria:task.acceptance_criteria,context:task.context,checkpoint:task.checkpoint,shared}),outputSchema:z.toJSONSchema(schema.required({humanSummary:true})) as NonNullable<AgentInput["outputSchema"]>}));
         await workerState(task_id,execution,key,"Researcher",result);
         return advance(task_id,execution,result.status === "completed" ? "done" : task.phase,{},result.status,result.status === "needs_input" ? result.summary : null,result);
       }
@@ -89,7 +92,7 @@ export default defineWorkflowTool({
         const key = `evaluation:${task.generation}`;
         const cached = await workerState(task_id, execution, key, "Evidence review");
         const result = evaluationSchema.parse(cached ?? await ctx.agent("task_reviewer", {
-          message: JSON.stringify({ mode: "evaluate", ...context }), outputSchema: z.toJSONSchema(evaluationSchema) as NonNullable<AgentInput["outputSchema"]>,
+          message: JSON.stringify({ mode: "evaluate", ...context, reportingInstructions: humanCommunicationInstructions }), outputSchema: z.toJSONSchema(evaluationSchema.required({humanSummary:true})) as NonNullable<AgentInput["outputSchema"]>,
         }));
         await workerState(task_id, execution, key, "Evidence review", result);
         if (task.cycle_id) return advance(task_id, execution, "done", {}, "completed", result.satisfied ? null : "Investigation concluded with inconclusive findings", result);

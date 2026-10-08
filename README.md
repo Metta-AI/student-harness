@@ -214,19 +214,20 @@ hydration), and `channels/eve.ts` (accepts the arena's own student cookie).
 2. Provision Supabase from the linked Vercel project: `vercel integration add supabase`, then
    `vercel env pull .env.local` and `npm run db:migrate` (uses `psql` and `POSTGRES_URL`).
 3. `vercel env pull` also writes `VERCEL_OIDC_TOKEN`, which the eve service needs locally to create
-   Vercel Sandboxes. Refresh it when sandbox creation starts failing with an auth error.
+   Vercel Sandboxes and authenticate to AI Gateway. Refresh it when expired. To preserve local-only
+   overrides, pull to a temporary file and copy its `VERCEL_OIDC_TOKEN` into `.env.local`.
 4. `npm install` and `npm run dev`. Next boots the eve dev server beside it. `npm run eve:info`
    prints what eve discovered under `agent/`.
 
-For local OpenAI research, `PRESTON_OPENAI_TRANSPORT=chatgpt` uses the existing
-Codex/ChatGPT login through Eve while preserving the selected model and reasoning
-effort. Restart the dev server after changing this setting. The default is API-key
-transport. Subscription transport is local only; deployments require funded API
-credentials. Provider billing failures preserve the session and request attention
+Preston and all research subagents use Vercel AI Gateway, preserving the selected model
+and reasoning effort. Gateway uses `AI_GATEWAY_API_KEY` when set, otherwise the linked
+Vercel project's OIDC credentials and Gateway credits. Direct OpenAI/Anthropic keys and
+the old `PRESTON_OPENAI_TRANSPORT` setting do not route these agent calls. Restart the
+dev server after refreshing credentials. Billing failures preserve the session and request attention
 instead of retrying indefinitely; temporary rate limits resume automatically.
 
 Deploy the project to Vercel from the repo root. `withEve` emits the eve service and routes; the same
-project environment must carry `SESSION_SECRET`, `ANTHROPIC_API_KEY`, and the Supabase variables.
+project environment must carry `SESSION_SECRET` and the Supabase variables; AI Gateway uses project OIDC.
 Students sign in with a Softmax user token; it is encrypted in an HTTP-only cookie and stored sealed
 in the students table so the durable coach can act as them between requests.
 

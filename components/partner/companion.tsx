@@ -50,12 +50,14 @@ function useCompanionController(leagueId=defaultLeagueId) {
   const capturePending = useRef(false);
   const stopTalk = useCallback(() => {
     const call = live.current; live.current = null; call?.close();
+    workspace.current!.setControl(false); setControl(false);
     setMicPaused(false); setSpeaking(false); setPhase("off"); setBackgroundWorking(false);
   }, []);
   const toggleTalk = useCallback(() => {
     if (live.current) { stopTalk(); return; }
     refreshPreferences();
     setNotice(""); setTranscriptSaved(true); setQuiet(false); presentationRef.current.begin();
+    workspace.current!.setControl(true); setControl(true);
     let voiceSessionId='';
     const epoch=conversationEpoch.current;
     const call = new PrestonLive({
@@ -63,13 +65,13 @@ function useCompanionController(leagueId=defaultLeagueId) {
       anchor:()=>bridge.current?.anchor()??null,
       speaking:value=>{if(live.current===call)setSpeaking(value);},
       leagueId,
-      phase: value => { if (live.current !== call) return; setPhase(value); if (value === "off") { live.current = null; setMicPaused(false); } },
+      phase: value => { if (live.current !== call) return; setPhase(value); if (value === "off") { live.current = null; setMicPaused(false); workspace.current!.setControl(false); setControl(false); } },
       notice: text => { if (live.current === call) setNotice(text); },
       working: value => { if (live.current === call) setBackgroundWorking(value); },
       transcript: event => { if(epoch===conversationEpoch.current && voiceSessionId) setTranscripts(previous=>[...previous,{...event,session_id:voiceSessionId}]); },
       saved: saved=>{if(epoch===conversationEpoch.current)setTranscriptSaved(saved);},
       history: ()=>bridge.current?.history()??[],
-      context: () => ({ leagueId, presentation: presentationRef.current.context(), navigationOnly: true, view: document.querySelector('.preview-card [role="tab"][aria-selected="true"]')?.textContent, screen: workspace.current!.context() }),
+      context: () => ({ leagueId, presentation: presentationRef.current.context(), navigationOnly: true, camera: "Camera preview is local only. No camera images are sent; never claim to see the user.", view: document.querySelector('.preview-card [role="tab"][aria-selected="true"]')?.textContent, screen: workspace.current!.context() }),
       tool: async command => {
         if (live.current !== call) return { result: { ok: false, error: "Call ended" } };
         if (["present_view","create_view"].includes(command.name)) {
@@ -80,6 +82,7 @@ function useCompanionController(leagueId=defaultLeagueId) {
           }
           const response = await fetch(command.name === "create_view"?`/api/views?league=${encodeURIComponent(leagueId)}`:"/api/presentation", { method: "POST", headers: { "Content-Type": "application/json" }, body: command.arguments });
           const prepared = await response.json();
+          if (live.current !== call) return { result: { ok: false, error: "Call ended" } };
           return { result: response.ok ? presentationRef.current.present(prepared.presentation) : { status: "rejected", error: prepared.error } };
         }
         if (command.name === "inspect_view") return { result: { presentation: presentationRef.current.context(), screen: workspace.current!.context(), workspace: JSON.parse(workspace.current!.snapshot()) } };
@@ -105,10 +108,11 @@ function useCompanionController(leagueId=defaultLeagueId) {
 
   const stopScreen = useCallback(() => {
     captureEpoch.current++; capturePending.current = false;
-    workspace.current!.revoke(); setScreen(false); setControl(false); setSharingPending(false);
+    const local = workspace.current!; const navigating = local.control && !!live.current;
+    local.revoke(); local.setControl(navigating); setScreen(false); setControl(navigating); setSharingPending(false);
   }, []);
   const share = useCallback(async () => {
-    if (workspace.current!.grant) { stopScreen(); return; }
+    if (workspace.current!.stream) { stopScreen(); return; }
     if (capturePending.current) return;
     if (!navigator.mediaDevices?.getDisplayMedia) return;
     setNotice(""); setSharingPending(true); capturePending.current = true;
@@ -177,8 +181,8 @@ export function CompanionProvider({ children, leagueId=defaultLeagueId }: { chil
 }
 
 export function TalkButton({ disabled }: { disabled: boolean }) {
-  const { phase, toggleTalk, capabilities } = useCompanion();
-  const label=phase==='off'?'Talk with Preston':phase==='connecting'?'Connecting…':phase==='paused'?'Microphone paused':'Listening…';
+  const { phase, speaking, toggleTalk, capabilities } = useCompanion();
+  const label=phase==='off'?'Talk with Preston':phase==='connecting'?'Connecting…':phase==='paused'?'Microphone paused':speaking?'Speaking…':'Listening…';
   return <button id="present-talk-toggle" type="button" className={`companion-talk-button${phase !== "off" ? " active" : ""}${phase === "paused" ? " is-paused" : ""}`} onClick={toggleTalk} disabled={disabled || (!capabilities.voice && phase === "off")} aria-label={phase === "off" ? "Talk with Preston" : "End voice conversation"} aria-pressed={phase !== "off"} title={!capabilities.voice ? "Voice isn’t supported in this browser" : phase === "off" ? "Talk with Preston" : "End voice conversation"}>{phase === "off" ? <Mic size={18} /> : <span className="companion-wave" aria-hidden="true"><i/><i/><i/></span>}<span>{label}</span>{phase!=='off'?<Square size={12}/>:null}</button>;
 }
 
@@ -196,9 +200,9 @@ export function CompanionControls({showTranscript=false}:{showTranscript?:boolea
     {c.backgroundWorking ? <p className="companion-access-note" role="status">I’m looking into that. We can keep talking.</p> : null}
     {showTranscript&&c.liveCaptions&&c.transcripts.length?<div className="voice-transcript live-transcript" aria-label="Live voice transcript">{spokenMessages(c.transcripts).slice(-8).map(turn=><p key={turn.id}><strong>{turn.role==='user'?'You':'Preston'}</strong><span>{turn.text}</span></p>)}</div>:null}
     {c.notice.includes("Resume audio") ? <button type="button" onClick={c.resumeAudio}>Resume audio</button> : null}
-    {c.screen ? <div className="companion-access"><button type="button" onClick={c.toggleControl} aria-pressed={c.control}><MousePointer2 size={14} />{c.control ? "Control on" : "Allow control"}</button></div> : null}
+    {c.screen || c.phase !== "off" ? <div className="companion-access"><button type="button" onClick={c.toggleControl} aria-pressed={c.control}><MousePointer2 size={14} />{c.control ? "Preston can navigate · Pause" : "Let Preston navigate"}</button></div> : null}
     {c.screen ? <p className="companion-access-note">{c.control ? "Preston can point, draw, and navigate here. Esc stops access." : "Screen shared. Preston can request frames in this conversation."}</p> : null}
-    {c.screen ? <p className="companion-access-note">Captured frames are saved with your conversation.</p> : null}
+    {c.control && !c.screen ? <p className="companion-access-note">We can explore tabs and results together. You can take over anytime.</p> : null}
     {c.notice ? <div className="companion-notice" role="alert"><span>{c.notice}</span><button type="button" onClick={c.dismiss} aria-label="Dismiss access notice"><X size={13} /></button></div> : null}
   </section>;
 }

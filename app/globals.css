@@ -7,6 +7,9 @@
 @import "./styles.css" layer(legacy);
 @import "./performance.css" layer(legacy);
 @import "./opponents.css" layer(legacy);
+@import "./lab.css" layer(legacy);
+@import "./coaching-home.css" layer(legacy);
+@import "./request-workspace.css" layer(legacy); /* Immersive request canvas. */
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 @import "tw-shimmer";

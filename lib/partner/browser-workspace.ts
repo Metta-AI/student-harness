@@ -25,13 +25,13 @@ export class BrowserWorkspace {
   }
 
   setControl(enabled: boolean) {
-    this.control = enabled && this.grant !== null;
-    if (this.grant) this.grant = crypto.randomUUID();
+    this.control = enabled;
+    this.grant = enabled || this.stream ? crypto.randomUUID() : null;
     this.targets.clear(); this.pointer(null); this.mark(null);
   }
 
   context(): Record<string, string | boolean> {
-    return this.grant ? { grant: this.grant, control: this.control, scope: "GoTA workspace only", instruction: "Use workspace_screen look for a current screenshot and target IDs. Shared screenshots become part of this conversation. Make screen calls sequentially." } : { enabled: false };
+    return this.grant ? { grant: this.grant, control: this.control, scope: "Current workspace navigation only", screenShared: !!this.stream, instruction: "Use workspace_screen look for current visible text and target IDs. A screenshot is included only when the user shares a screen. Navigate, point, and scroll using these targets. Make calls sequentially." } : { enabled: false };
   }
 
   private visible(element: HTMLElement) {
@@ -70,8 +70,8 @@ export class BrowserWorkspace {
     try {
       const action = screenActionSchema.parse(raw);
       authorizeScreenAction(action, this.grant, this.control);
-      if (!this.stream?.getVideoTracks().some(t => t.readyState === "live")) throw new Error("Screen sharing is no longer live.");
       if (action.action === "look") {
+        if (!this.stream?.getVideoTracks().some(t => t.readyState === "live")) return { ok: true, detail: "Current workspace text and navigation targets. No screen image is shared.", snapshot: this.snapshot() };
         if (!this.video || this.video.readyState < 2 || !this.video.videoWidth) throw new Error("The shared screen is not ready. Try look again shortly.");
         const canvas = document.createElement("canvas");
         const scale = Math.min(1, 1440 / this.video.videoWidth);
@@ -116,7 +116,7 @@ export class BrowserWorkspace {
           break;
         }
         case "scroll": {
-          let pane: HTMLElement | null = target?.element ?? document.querySelector('.preview-card [role="tabpanel"]');
+          let pane: HTMLElement | null = target?.element ?? document.querySelector('.preview-card [role="tabpanel"]:not([hidden])');
           if (!pane) pane = document.querySelector(".together-view, .episodes-view, .semantic-pane, .task-panel");
           while (pane && pane.scrollHeight <= pane.clientHeight + 1) pane = pane.parentElement;
           if (!pane || !pane.closest(".preview-card")) throw new Error("No scrollable workspace pane is available.");

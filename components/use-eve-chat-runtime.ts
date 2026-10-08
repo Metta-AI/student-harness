@@ -16,6 +16,8 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { isInactiveSession, sendWithSessionRecovery } from "../lib/chat-recovery";
 import { spokenMessages, mergeSpokenMessages } from "../lib/voice/conversation";
 import { useCompanion } from "./partner/companion";
+import { workspaceViewEvent, type WorkspaceViewUpdate } from "../lib/views/request";
+import { presentationInputSchema } from "../lib/workspace/presentation";
 
 type AgentOptions = NonNullable<Parameters<typeof useEveAgent>[0]>;
 
@@ -50,11 +52,25 @@ export function useEveChatRuntime({ sessionId, disabled, submissionDisabled=fals
   const { workspace, presentation, bind, updateVoice, stopTalk, stopScreen, recentTranscript, transcripts, historyLoading, liveCaptions, phase } = useCompanion();
   const sending = useRef(false);
   const sendError = useRef<Error | undefined>(undefined);
+  const requestedView = useRef<{id:string;token:string;started:boolean}|null>(null);
+  const finishView = useCallback((update:WorkspaceViewUpdate)=>{
+    window.dispatchEvent(new CustomEvent(workspaceViewEvent,{detail:update}));
+    requestedView.current=null;
+  },[]);
+  useEffect(()=>()=>{
+    if(requestedView.current)finishView({requestId:requestedView.current.id,status:"error",message:"This view was interrupted. Try again."});
+  },[finishView]);
   const agent = useEveAgent({
     ...(sessionId ? { initialSession: { sessionId, streamIndex: 0 }, resume: true } : {}),
     onSessionChange,
     onEvent,
-    onError: error => { sendError.current = error; if (!isInactiveSession(error)) onError(error); },
+    onError: error => {
+      sendError.current = error;
+      if (!isInactiveSession(error)) {
+        if(requestedView.current)finishView({requestId:requestedView.current.id,status:"error",message:"Preston couldn’t create this view. Try again."});
+        else onError(error);
+      }
+    },
   });
   const presentationSession = useRef<string | null | undefined>(undefined);
   useEffect(() => {
@@ -93,6 +109,11 @@ export function useEveChatRuntime({ sessionId, disabled, submissionDisabled=fals
   const send = useCallback((message: AppendMessage, steer: boolean) => {
     const context = message.runConfig?.custom;
     presentation.begin();
+    if(requestedView.current)finishView({requestId:requestedView.current.id,status:"error",message:"Another message interrupted this view. Try again."});
+    if(context?.kind==="workspace-view"&&typeof context.viewRequestId==="string") {
+      presentation.manual();
+      requestedView.current={id:context.viewRequestId,token:presentation.context().requestToken,started:false};
+    }
     const clientContext = { ...(context ?? {}), presentScreen: workspace.context(), presentation: presentation.context(), recentVoice: recentTranscript() };
     if (steer) steerNotice.current();
     const previousConversation = live.current.data.messages.filter(m => m.role === "user" || m.role === "assistant").slice(-12).map(m => ({ role: m.role, text: m.parts.filter(p => p.type === "text").map(p => p.type === "text" ? p.text : "").join("\n").slice(-2000) }));
@@ -106,8 +127,11 @@ export function useEveChatRuntime({ sessionId, disabled, submissionDisabled=fals
       // Eve reports primary-send failures through onError and resolves send().
       // Read the callback receipt before deciding whether a safe retry is needed.
       if (sendError.current) throw sendError.current;
-    }, () => live.current.reset()).catch(error => { if (isInactiveSession(error)) onError(error); }).finally(() => { sending.current = false; });
-  }, [workspace, presentation.begin, presentation.context, recentTranscript, onError]);
+    }, () => live.current.reset()).catch(error => {
+      if(requestedView.current)finishView({requestId:requestedView.current.id,status:"error",message:"Preston couldn’t create this view. Try again."});
+      else if (isInactiveSession(error)) onError(error);
+    }).finally(() => { sending.current = false; });
+  }, [workspace, presentation.begin, presentation.context, presentation.manual, recentTranscript, onError, finishView]);
 
   useEffect(() => {
     if (!sending.current && isInactiveSession(agent.error)) live.current.reset();
@@ -159,9 +183,26 @@ export function useEveChatRuntime({ sessionId, disabled, submissionDisabled=fals
       if (part.type !== "dynamic-tool" || !["present_view","create_view"].includes(part.toolName) || part.state !== "output-available" || shownViews.current.has(part.toolCallId)) continue;
       shownViews.current.add(part.toolCallId);
       const output = part.output as { presentation?: unknown } | undefined;
-      if (output?.presentation) presentation.present(output.presentation);
+      if (output?.presentation) {
+        const receipt = presentation.present(output.presentation);
+        const parsed = presentationInputSchema.safeParse(output.presentation);
+        if(requestedView.current&&parsed.success&&parsed.data.requestToken===requestedView.current.token&&parsed.data.view==="custom"&&parsed.data.artifactId) {
+          finishView(receipt.status==="rejected"
+            ? {requestId:requestedView.current.id,status:"error",message:"This view was interrupted. Try again."}
+            : {requestId:requestedView.current.id,status:"ready",artifactId:parsed.data.artifactId});
+        }
+      }
     }
-  }, [agent.data.messages, presentation.present]);
+  }, [agent.data.messages, presentation.present, finishView]);
+
+  useEffect(()=>{
+    const request=requestedView.current;
+    if(!request)return;
+    if(busy)request.started=true;
+    else if(request.started&&(terminal||agent.status==="ready")) {
+      finishView({requestId:request.id,status:"error",message:"Preston finished without creating a view. Try a more specific description."});
+    }
+  },[busy,terminal,agent.status,agent.data.messages,finishView]);
 
   // Eve parks workspace_screen as an input request. Execute against the live grant, then
   // return its receipt (including pixels) to the same durable tool call. No render-time effects.

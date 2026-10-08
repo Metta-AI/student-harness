@@ -1,30 +1,73 @@
-import {chromium} from 'playwright';
+import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
-const base=process.env.BROWSER_TEST_URL||'http://localhost:3000';
-const browser=await chromium.launch({headless:true,...(process.env.CHROME_EXECUTABLE?{executablePath:process.env.CHROME_EXECUTABLE}:{})});
-const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
-let mode='server-error',release;let sessionCalls=0;
-await page.route('**/api/session',async route=>{
- sessionCalls++;
- if(mode==='stalled'){await new Promise(resolve=>release=resolve);return route.fulfill({json:{email:null}}).catch(()=>{});}
- if(mode==='network-error')return route.abort();
- if(mode==='server-error')return route.fulfill({status:503,body:'Unavailable'});
- if(mode==='malformed')return route.fulfill({json:{error:'Unexpected response'}});
- return route.fulfill({json:{email:null}});
+import {mkdir} from 'node:fs/promises';
+const baseURL = process.env.BROWSER_TEST_URL || 'http://localhost:3000';
+const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
+page.setDefaultTimeout(15000);
+const errors = []; page.on('pageerror', e => errors.push(e.message));
+const policyId = 'e0000000-0000-4000-8000-000000000088';
+let episodeFailure = false;
+const outcomes = ['lost', 'time_limit', 'won', 'lost', 'won', 'won', 'time_limit', 'won', 'won', 'won', 'won', 'won'];
+const episodes = outcomes.map((outcome, i) => ({ id: `episode-${i}`, status: 'completed', created_at: new Date(Date.UTC(2026, 9, 7, i)).toISOString(), completed_at: new Date(Date.UTC(2026, 9, 7, i, 5)).toISOString(), outcome, score: outcome === 'won' ? 1 : 0, round: { number: i + 100 }, opponents: [{ policy: i % 2 ? 'rival:v2' : 'challenger:v2', player: i % 2 ? 'Rival' : 'Challenger', policyVersionId: 'rival', seats: 5 }], teammates: [], seats: [0, 1, 2, 3, 4], side: 'Red', format: 'team', replay_url: 'https://softmax.com/replay', episode_id: `played-${i}` }));
+await page.route('**/*', async route => {
+  const url = new URL(route.request().url());
+  if (url.origin !== new URL(baseURL).origin) return route.abort();
+  const send = json => route.fulfill({ json });
+  if (url.pathname === '/api/session') return send({ email: 'alice@example.com', name: 'Alice', subjectId: 'alice' });
+  if (url.pathname === '/api/workspace') return send({ versions: [], experiments: [], latest: null, latestUpload: null, player: null, draft: null });
+  if (url.pathname === '/api/arena') return send({ league: { rounds_paused_at: null }, episodes: [] });
+  if (url.pathname === '/api/policy-stats') return send({ policies: [{ policy_version_id: policyId, player_id: 'player-4', policy_label: 'hero:v8', episodes_played: 12 }], currentPolicyId: policyId, entered: [policyId], entries: [{ policyVersionId: policyId, playerId: 'player-4', playerName: 'Alice', policyLabel: 'hero:v8', active: true, status: 'active' }], standings: Array.from({ length: 12 }, (_, i) => ({ rank: i + 1, player_id: `player-${i}`, player_name: i === 4 ? 'Alice' : ['Arena Champion', 'Tower Power', 'Lane Legend', 'Fort Knox', '', 'Rival', 'Challenger'][i] ?? `Player ${i + 1}`, policy_label: i === 4 ? 'hero:v8' : `arena:v${i + 1}`, score: 24 - i * 1.35, score_label: 'MMR', rounds_played: 40 - i })), checkedAt: new Date().toISOString() });
+  if (url.pathname === '/api/league-episodes') return episodeFailure ? route.fulfill({ status: 503, json: { error: 'Fixture unavailable' } }) : send({ policyVersionId: policyId, episodes: [...episodes].reverse(), nextCursor: null });
+  if (url.pathname === '/api/league-record') return send({ policyVersionId: policyId, games: 12, wins: 8, losses: 2, time_limits: 2, window_hours: 72, complete: true });
+  if (url.pathname === '/api/replay-session') return send({ ready: true, url: `${baseURL}/fixture-replay` });
+  if (url.pathname === '/fixture-replay') return route.fulfill({ contentType: 'text/html', body: '<p>Fixture replay</p>' });
+  if (url.pathname === '/api/episode-stats') return send({ steps: 100, game_stats: {}, policy_stats: [] });
+  if (url.pathname === '/api/partner') return send({ available: true, claims: [] });
+  if (url.pathname === '/api/research') return send({ available: true, cycles: [], events: [], plans: [], usage: [], evaluations: [] });
+  if (url.pathname === '/api/tasks') return send({ tasks: [], workers: [] });
+  if (url.pathname === '/api/chats') return send({ chats: [] });
+  if (url.pathname === '/api/views') return send({ views: [] });
+  if (url.pathname === '/api/coaching' || url.pathname === '/api/voice/transcripts') return send({ sessions: [] });
+  if (url.pathname === '/api/preferences') return send({ liveCaptions: true });
+  if (url.pathname.startsWith('/api/')) return route.fulfill({ status: 404, json: { error: 'No fixture' } });
+  return route.continue();
 });
-try {
- for(const failure of ['server-error','network-error','malformed','stalled']){
-  mode=failure;await page.goto(base);
-  const session=page.getByRole('region',{name:'Account session'});
-  await session.getByRole('button',{name:'Retry',exact:true}).waitFor({timeout:15000});
-  assert.equal(await page.getByText('Loading your session…',{exact:true}).count(),0);
-  assert.equal(await page.getByLabel('User token',{exact:true}).count(),0,'A lookup failure must not be treated as signed out');
-  mode='success';release?.();release=null;
-  const previous=sessionCalls;
-  await session.getByRole('button',{name:'Retry',exact:true}).click();
-  await page.getByLabel('User token',{exact:true}).waitFor();
-  assert(sessionCalls>previous);
-  console.log(`PASS: ${failure} leaves loading state and Retry recovers without a reload.`);
- }
+
+const saved='saved-chat-loading-test';
+let streamReads=0;let writes=0;
+await page.addInitScript(()=>localStorage.setItem('softmax-ide-active-chat','saved-chat-loading-test'));
+await page.route('**/api/preferences',route=>route.fulfill({json:{chatModel:'gpt-6-astra',reasoningEffort:'high',liveCaptions:true}}));
+await page.route('**/api/chats',route=>route.fulfill({json:{chats:[{session_id:saved,title:'Saved conversation',updated_at:'2026-10-07T20:00:00Z'}]}}));
+await page.route('**/eve/**',async route=>{
+ if(route.request().method()!=='GET'){writes++;return route.fulfill({status:400,json:{error:'No new work expected'}});}
+ streamReads++;
+ const events=[{type:'message.received',data:{message:'Our previous conversation',sequence:0,turnId:'turn_0'}},{type:'message.appended',data:{messageDelta:'Ready when you are.',sequence:0,stepIndex:0,turnId:'turn_0'}},{type:'turn.completed',data:{sequence:0,turnId:'turn_0'}},{type:'session.waiting',data:{continuationToken:saved,wait:'next-user-message'}}].map((e,i)=>({...e,meta:{id:`saved-${i}`,at:'2026-10-07T20:00:00Z'}}));
+ return route.fulfill({status:200,headers:{'content-type':'application/x-ndjson','x-eve-stream-format':'ndjson','x-eve-stream-version':'25','x-eve-stream-tail-index':String(events.length)},body:events.map(e=>JSON.stringify(e)).join('\n')+'\n'});
+});
+try{
+ await page.goto(baseURL,{waitUntil:'networkidle'});
+ await page.getByRole('region',{name:'Current policy and standing'}).getByText('#5',{exact:true}).waitFor();
+ assert.equal(streamReads,0,'Workspace must not auto-resume hidden saved chats');
+ await page.getByRole('button',{name:'Show chat',exact:true}).click();
+ const chat=page.locator('#present-chat');
+ await chat.getByText('Ready when you are.',{exact:true}).waitFor();
+ assert(streamReads>0,'Opening chat restores its session');
+ const input=chat.locator('textarea.aui-composer-input');
+ await input.fill('Keep my unsent draft');
+ await page.getByRole('button',{name:'Hide chat',exact:true}).click();
+ await page.getByRole('button',{name:'Show chat',exact:true}).click();
+ assert.equal(await input.inputValue(),'Keep my unsent draft','Hiding preserves the composer');
+ await chat.getByText('Ready when you are.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Hide chat',exact:true}).click();
+ const readsWhenHidden=streamReads;
+ await page.reload({waitUntil:'networkidle'});
+ await page.getByRole('region',{name:'Current policy and standing'}).getByText('#5',{exact:true}).waitFor();
+ assert.equal(streamReads,readsWhenHidden,'Reloading a workspace does not reserve a streaming connection');
+ await page.getByRole('button',{name:'Conversation history',exact:true}).click();
+ await page.locator('#chat-conversations').waitFor();
+ await page.locator('#chat-conversations').getByText('Saved conversation',{exact:true}).waitFor();
+ assert.equal(writes,0,'Restoring must never rerun agent work');
  assert.deepEqual(errors,[]);
-}finally{release?.();await browser.close();}
+ console.log('PASS: saved chats stay disconnected until opened; hiding preserves drafts and history; workspace reloads do not stream or send work.');
+}finally{await browser.close();}

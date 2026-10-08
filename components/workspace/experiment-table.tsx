@@ -5,18 +5,45 @@ import type { FundedCycle, ResearchPlan, ResearchEvaluation, ResearchEvent } fro
 import type { ResearchSettings } from "../../lib/research/autonomy-model";
 import { Input } from "@/components/ui/input";
 type Research = { available: boolean; cycles: FundedCycle[]; plans: ResearchPlan[]; evaluations: ResearchEvaluation[]; events: ResearchEvent[]; versions: {id:string;revision_number:number}[]; experiments: {xp_request_id:string;policy_version_id:string;title:string;status:string}[] };
-export function ExperimentTable({ feed, cycleId, onTask, onVersion, onDiscuss, onExperiment, onInspect }: { feed: TaskFeed; cycleId?: string; onTask: (id:string)=>void; onVersion:(revision:number)=>void; onDiscuss:(text:string)=>void; onExperiment:(id:string)=>void; onInspect:(id:string)=>void }) {
+export function ExperimentTable({ feed, enabled = true, cycleId, onTask, onVersion, onDiscuss, onExperiment, onInspect }: { feed: TaskFeed; enabled?: boolean; cycleId?: string; onTask: (id:string)=>void; onVersion:(revision:number)=>void; onDiscuss:(text:string)=>void; onExperiment:(id:string)=>void; onInspect:(id:string)=>void }) {
   const [creating,setCreating]=useState(false);
   const [data,setData]=useState<Research|null>(null),[settings,setSettings]=useState<ResearchSettings|null>(null),[error,setError]=useState(""),[pending,setPending]=useState(false),[selected,setSelected]=useState(cycleId??"");
   useEffect(()=>{if(cycleId)setSelected(cycleId);},[cycleId]);
   const requestSequence=useRef(0);
-  const refresh=useCallback(async()=>{
+  const inFlight=useRef<{promise:Promise<void>;controller:AbortController}|null>(null);
+  const refresh=useCallback((force=false):Promise<void>=>{
+    if(inFlight.current&&!force)return inFlight.current.promise;
+    inFlight.current?.controller.abort();
+    const controller=new AbortController();
     const request=++requestSequence.current;
-    const [r,a]=await Promise.all([fetch('/api/research'),fetch('/api/research/autonomy')]);
-    if(!r.ok||!a.ok)throw Error("Research could not be loaded.");const research=await r.json();const autonomy=await a.json();if(request!==requestSequence.current)return;setData(research);setSettings(autonomy.settings);setError("");
+    const promise=(async()=>{
+      try{
+        const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(15000)]);
+        const [r,a]=await Promise.all([fetch('/api/research',{signal}),fetch('/api/research/autonomy',{signal})]);
+        if(!r.ok||!a.ok)throw Error("Research could not be loaded. Please retry.");
+        const [research,autonomy]=await Promise.all([r.json(),a.json()]);
+        if(request!==requestSequence.current||controller.signal.aborted)return;
+        setData(research);setSettings(autonomy.settings);setError("");
+      }catch(cause){
+        if(controller.signal.aborted)return;
+        throw Error(cause instanceof Error&&cause.name==='TimeoutError'?"Research is taking too long to respond. Please retry.":cause instanceof Error?cause.message:"Research could not be loaded.");
+      }finally{
+        if(inFlight.current?.controller===controller)inFlight.current=null;
+      }
+    })();
+    inFlight.current={promise,controller};
+    return promise;
   },[]);
-  useEffect(()=>{let live=true;const update=()=>{if(live)void refresh().catch(e=>{if(live)setError(e.message);});};update();const timer=setInterval(update,10000);return()=>{live=false;requestSequence.current++;clearInterval(timer);};},[refresh]);
-  async function write(input:Record<string,unknown>){setPending(true);try{const r=await fetch('/api/research/autonomy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input)});if(!r.ok)throw Error("Could not update research.");await refresh();return true;}catch(e){setError((e as Error).message);return false;}finally{setPending(false);}}
+  useEffect(()=>{
+    if(!enabled)return;
+    let live=true;
+    const update=()=>{if(live&&document.visibilityState==='visible')void refresh().catch(e=>{if(live)setError(e.message);});};
+    update();const timer=setInterval(update,10000);
+    document.addEventListener('visibilitychange',update);
+    window.addEventListener('research-updated',update);
+    return()=>{live=false;requestSequence.current++;inFlight.current?.controller.abort();inFlight.current=null;clearInterval(timer);document.removeEventListener('visibilitychange',update);window.removeEventListener('research-updated',update);};
+  },[enabled,refresh]);
+  async function write(input:Record<string,unknown>){setPending(true);try{const r=await fetch('/api/research/autonomy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input)});if(!r.ok)throw Error("Could not update research.");await refresh(true);return true;}catch(e){setError((e as Error).message);return false;}finally{setPending(false);}}
   const revision=(id:string)=>data?.versions.find(v=>v.id===id)?.revision_number;
   const chosenPlan=data?.plans.find(p=>p.id===selected);
   const chosen=data?.cycles.find(c=>c.id===(chosenPlan?.cycle_id??selected));
@@ -58,7 +85,7 @@ export function ExperimentTable({ feed, cycleId, onTask, onVersion, onDiscuss, o
         <td><span className={`experiment-status ${row.status}`}>{statusLabel(row.status)}</span></td>
         <td>{row.xp?<button className="text-button" onClick={()=>onExperiment(row.xp!)}>{row.result?statusLabel(row.result):'Episodes'} ↗</button>:<span className="muted">—</span>}</td>
       </tr>)}
-      {!rows.length?<tr><td colSpan={4} className="experiment-empty">{!data?'Loading experiments…':!data.available?'Research is unavailable in this workspace.':'No experiments yet.'}</td></tr>:null}
+      {!rows.length?<tr><td colSpan={4} className="experiment-empty">{!data?error?'Experiments could not be loaded. Use Retry above.':'Loading experiments…':!data.available?'Research is unavailable in this workspace.':'No experiments yet.'}</td></tr>:null}
     </tbody></table></div>
     {chosen ? <article className="investigation-detail"><div className="workspace-section-heading"><h3>{chosenPlan?.objective??chosen.question}</h3><button className="text-button" onClick={()=>setSelected('')}>Close</button></div><p>{chosen.criteria}</p><button className="text-button" onClick={()=>{const n=revision(chosen.baseline_id);if(n)onVersion(n);}}>Baseline r{revision(chosen.baseline_id)} ↗</button><span> · </span><button className="text-button" onClick={()=>{const n=revision(chosen.active_version_id);if(n)onVersion(n);}}>Selected r{revision(chosen.active_version_id)} ↗</button>
       {data?.plans.filter(p=>chosenPlan?p.id===chosenPlan.id:p.cycle_id===chosen.id).map(p=><div className="experiment-detail" key={p.id}><strong>{p.objective}</strong><p>{p.rationale}</p><p><b>Test:</b> {p.criteria}</p><details><summary>Evidence and execution settings</summary><p>Up to {p.max_calls} model calls · {statusLabel(p.status)}</p><pre className="experiment-plan-evidence">{JSON.stringify(p.evidence,null,2)}</pre></details>{p.task_id?<button className="secondary" onClick={()=>onTask(p.task_id!)}>Workers and progress ↗</button>:<span>{p.status}</span>}</div>)}

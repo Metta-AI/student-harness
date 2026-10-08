@@ -1,0 +1,48 @@
+.workspace-mode-switch { display: flex; padding: 3px; gap: 3px; background: #eae8de; border-radius: 7px; flex-shrink: 0; }
+.workspace-mode-switch button { color: #655f52; background: transparent; border: none; border-radius: 5px; padding: 8px 14px; font-size: 12px; }
+.workspace-mode-switch button[aria-pressed="true"] { background: #fffdf4; color: #183a32; box-shadow: 0 1px 4px #3332; }
+.partner-header > .account-bar { margin-left: auto; margin-top: 0; border-top: 0; padding: 0; }
+.partner-header .account-trigger { padding: 4px 8px; }
+.partner-header .account-identity small { display: none; }
+.partner-body .tabs[hidden] { display: none; }
+.preston-lab { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; background: #faf9f3; }
+.lab-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 25px 28px; border-bottom: 1px solid #e4dac8; background: linear-gradient(115deg,#edf1e5,#faf7ed); }
+.lab-heading h2, .shared-experiments h2 { margin: 5px 0 8px; font-size: 25px; letter-spacing: -.7px; }
+.lab-heading p, .shared-experiments header p { margin: 0; color: #777265; font-size: 12px; }
+.lab-heading > button { flex-shrink: 0; }
+.lab-layout { display: flex; flex: 1; min-height: 0; }
+.lab-sessions { display: flex; flex-direction: column; flex: 0 0 210px; min-height: 0; border-right: 1px solid #e0e1d4; background: #f2f3e9; }
+.lab-overview-link { text-align: left; margin: 12px 10px 4px; padding: 10px; font-size: 12px; color: #496143; background: transparent; border: 1px solid transparent; }
+.lab-overview-link[aria-pressed="true"] { background: #e3e9d9; border-color: #d0dbc4; }
+.lab-content { flex: 1; min-width: 0; overflow: auto; }
+.lab-content > .tasks-view { padding: 20px 26px; }
+.lab-content > .experiment-workspace { padding: 24px 26px; }
+.lab-back { margin: 18px 26px 0; }
+.shared-experiments { padding: 28px; }
+.shared-experiments > header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 26px; }
+.experiment-result-list { display: grid; gap: 12px; list-style: none; padding: 0; margin: 0; }
+.experiment-result-card { width: 100%; display: flex; gap: 24px; align-items: center; text-align: left; background: #fffdf4; color: #242d25; border: 1px solid #e4dac8; border-radius: 7px; padding: 20px; }
+.experiment-result-card:hover { background: #f3f5e9; border-color: #b9c6a5; }
+.experiment-result-card > div { flex: 1; min-width: 0; }
+.experiment-result-card h3 { font-size: 15px; margin: 7px 0; overflow-wrap: anywhere; }
+.experiment-result-card p { color: #777265; font-size: 11px; margin: 0; }
+.experiment-result-status { color: #596f47; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+.experiment-result-card dl { display: flex; gap: 24px; margin: 0; }
+.experiment-result-card dt { font-size: 10px; color: #777265; }
+.experiment-result-card dd { font-size: 23px; font-variant-numeric: tabular-nums; margin: 4px 0 0; }
+.experiment-result-open { font-size: 11px; color: #496143; }
+.experiment-results-empty { padding: 40px 24px; text-align: center; border: 1px dashed #d4d9c5; background: #f5f6ed; border-radius: 7px; }
+.experiment-results-empty h3 { font-size: 18px; }.experiment-results-empty p { color: #777265; font-size: 13px; }
+@media (max-width: 1000px) {
+  .lab-layout { flex-direction: column; min-height: auto; }
+  .lab-sessions { flex: none; border-right: 0; border-bottom: 1px solid #e0e1d4; }
+  .lab-sessions .background-sessions { max-height: 190px; min-height: 60px; }
+  .lab-content { overflow: visible; }
+  .experiment-result-card { flex-wrap: wrap; gap: 16px; }
+  .experiment-result-card > div { flex-basis: 100%; }
+}
+@media (max-width: 600px) {
+  .lab-heading, .shared-experiments, .lab-content > .tasks-view, .lab-content > .experiment-workspace { padding: 20px 16px; }
+  .lab-heading, .shared-experiments > header { align-items: start; flex-direction: column; }
+  .experiment-result-card dl { gap: 20px; }
+}

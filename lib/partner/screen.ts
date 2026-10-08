@@ -21,6 +21,6 @@ export type ScreenReceipt = z.infer<typeof screenReceiptSchema>;
 
 /** A new sharing activation/control change fences every earlier queued command. */
 export function authorizeScreenAction(action: ScreenAction, grant: string | null, control: boolean) {
-  if (!grant || action.grant !== grant) throw new Error("Screen access ended or changed. Ask the user to share again; do not retry an old grant.");
+  if (!grant || action.grant !== grant) throw new Error("Workspace access ended or changed. Inspect current access before trying again; do not retry an old grant.");
   if (action.action !== "look" && !control) throw new Error("Workspace control is off. The user can enable it in Preston's panel.");
 }

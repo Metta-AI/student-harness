@@ -1,3 +1,4 @@
+import {studyHumanSummary} from '../tasks/communication';
 import {mapConcurrent} from './batch';
 import {attemptBatch,transportCooldownUntil} from './attempt-queue';
 import { db,studentToken } from '../db';
@@ -158,7 +159,7 @@ export async function processStudy(id:string){
   else if(attempts.some(a=>a.state==='auditing'))state='auditing';
   const retryAt=transportCooldownUntil(attempts);
   checked(await db().from('agent_tasks').update({status:state==='completed'?'completed':state==='invalid'?'failed':state==='canceled'?'canceled':campaign.state==='paused'?'paused':campaign.state==='canceled'?'canceled':'waiting',
-   result:result?{summary:`${s.cohort}: wins ${result.baselineWins} → ${result.candidateWins}; ${result.interpretation}`,studyId:id,...result}:null,
+   result:result?{humanSummary:studyHumanSummary(result,s.cohort),summary:`${s.cohort}: wins ${result.baselineWins} → ${result.candidateWins}; ${result.interpretation}`,studyId:id,...result}:null,
    checkpoint:{campaign_id:campaign.id,study_id:id,research_progress:{summary:`${pairs.length}/${s.protocol.pairs} pairs · ${completed.length} audited games · ${attempts.length} attempts${retryAt&&running&&!invalid?` · Host transport cooldown until ${new Date(retryAt).toISOString()}`:''}`}},
    reason:invalidReason??failures[0]?.error?.message??null,next_check_at:'2100-01-01T00:00:00Z',updated_at:new Date().toISOString()}).eq('id',s.task_id));
   await saveStudy(s,{state,...(result?{result}:invalidReason?{result:{invalidReason}}:{})},30);

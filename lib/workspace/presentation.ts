@@ -1,9 +1,9 @@
 import { wikiPages } from "./policy-wiki.ts";
 import { z } from "zod";
 export const workspaceTabs = ["performance", "strategy", "experiments", "episodes", "opponents", "development"] as const;
-export type WorkspaceTab = typeof workspaceTabs[number];
+export type WorkspaceTab = typeof workspaceTabs[number] | "lab";
 export const viewSchema = z.object({
-  view: z.enum([...workspaceTabs, "custom"]),
+  view: z.enum([...workspaceTabs, "lab", "custom"]),
   opponentPolicyId: z.uuid().optional(),
   artifactId: z.uuid().optional(),
   experimentId: z.string().regex(/^xreq_[0-9a-f-]{36}$/).optional(),

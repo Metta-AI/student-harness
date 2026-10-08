@@ -1351,7 +1351,6 @@ a:hover { text-decoration: underline; }
 .companion-friendly .present-portrait { width: 72px; height: 72px; border-radius: 50%; box-shadow: 0 0 0 5px #e7ecdf70; transition: box-shadow .3s; }
 .companion-friendly .is-listening .present-portrait { box-shadow: 0 0 0 5px #dce8d4; }
 .companion-friendly .is-speaking .present-portrait { animation: companion-breathe 1.5s ease-in-out infinite; }
-.companion-eyebrow { font-size: 10px; letter-spacing: .015em; color: #76826c; }
 .companion-friendly .present-avatar-identity h2 { margin: 3px 0 5px; padding: 0; font-size: 24px; font-weight: 600; }
 .companion-friendly .present-avatar-identity p, .companion-status-link { font-size: 12px; line-height: 1.5; color: #617356; }
 .companion-status-link { display: flex; gap: 4px; align-items: start; text-align: left; padding: 0; border: 0; background: none; }
@@ -1365,8 +1364,9 @@ a:hover { text-decoration: underline; }
 .companion-talk-button.active { background: #e5eddc; color: #34583c; border-color: #cfddc1; }
 .companion-share-button { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid #dce3d2; color: #637856; background: transparent; }
 .companion-share-button:hover,.companion-share-button.active { background: #e3ecd9; color: #365b40; }
-.companion-type-button { padding: 7px 3px; border: 0; background: transparent; font-size: 11px; color: #677360; }
-.companion-type-button:hover { text-decoration: underline; }
+.companion-type-button { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; padding: 0; border: 1px solid #dce3d2; border-radius: 50%; background: transparent; color: #677360; }
+.companion-type-button:hover:not(:disabled), .companion-type-button[aria-expanded="true"] { background: #e8efdf; color: #365d3f; border-color: #b8c8aa; }
+.companion-type-button:focus-visible { outline: 2px solid #829776; outline-offset: 3px; }
 .companion-friendly button:disabled { opacity: .5; cursor: not-allowed; }
 .companion-friendly button:focus-visible { outline: 2px solid #739364; outline-offset: 3px; }
 .companion-wave { display: flex; align-items: center; height: 16px; gap: 3px; }
@@ -1401,3 +1401,23 @@ a:hover { text-decoration: underline; }
 .companion-friendly .partner-chat[data-composer-open="false"] [data-slot="aui_next-suggestions"] { display: none; }
 .companion-friendly .aui-thread-viewport-footer { background: #f7f8f0; }
 .companion-talk-button.is-paused .companion-wave i { animation: none; opacity: .45; }
+
+/* Preston keeps a user-sized column, whether text chat is open or tucked away. */
+@media (min-width: 801px) {
+  .shell.partner-shell, .shell.partner-shell.chat-open { grid-template-columns: minmax(0, 1fr) min(48vw, var(--preston-width, 360px)); }
+}
+.present-panel { position: relative; }
+.preston-resize-handle { position: absolute; inset: 0 auto 0 0; width: 7px; z-index: 35; cursor: col-resize; touch-action: none; user-select: none; }
+.preston-resize-handle:hover, .preston-resize-handle:focus-visible { background: #6b8a6255; outline: none; }
+.companion-friendly .partner-chat[hidden] { display: none; }
+.companion-camera { display: contents; }
+.companion-camera-preview { order: 2; flex-basis: 100%; position: relative; max-width: 220px; margin: 7px 0 0; overflow: hidden; border: 1px solid #dce1d2; border-radius: 12px; background: #eef1e7; }
+.companion-camera-preview video { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #1f2d25; }
+.companion-camera-preview > button { position: absolute; top: 6px; right: 6px; padding: 4px; border: 0; border-radius: 50%; background: #fffdf7e8; color: #315b3e; }
+.companion-camera-preview figcaption { display: flex; gap: 6px; align-items: center; padding: 7px 9px 2px; font-size: 11px; color: #3e5e42; }
+.companion-camera-preview p { font-size: 10px; color: #66735e; margin: 2px 9px 8px; }
+.camera-live-dot { height: 6px; width: 6px; border-radius: 50%; background: #68865c; }
+@media (max-width: 800px) {
+  .present-panel { position: fixed; }
+  .preston-resize-handle { display: none; }
+}

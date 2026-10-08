@@ -1,4 +1,5 @@
 "use client";
+import { defaultLeagueId } from "../../lib/league-catalog";
 import { useEffect, useState } from "react";
 import type { LeagueStanding } from "../../lib/softmax";
 import type { PolicyRevision } from "../../lib/semantic-ir";
@@ -8,6 +9,7 @@ import { StrategyOverview } from "./strategy-overview";
 import { PerformanceEvidence, type PerformanceVersion, type PerformanceRound } from "./performance-evidence";
 import { GeneratedView } from "./generated-view";
 import { Opponents } from "./opponents";
+import { ExperimentResults, type ExperimentResult } from "./experiment-results";
 import { ExperimentDetail } from "./experiment-detail";
 import { BasicCode } from "../basic-code";
 import { WikiFields } from "./policy-wiki";
@@ -18,20 +20,19 @@ type Data = {
   episodes: PracticeEpisode[];
   revision: PolicyRevision | null; versions: PerformanceVersion[]; entered: string[];
   standings: LeagueStanding[]; ownPlayerIds: string[]; activePlayerId?: string;
-  rounds: PerformanceRound[]; cycles: {id:string;question:string;criteria:string;state:string;baseline_id:string}[];
-  plans: {id:string;cycle_id:string;objective:string;status:string;criteria:string}[]; at: string; note: string;
+  rounds: PerformanceRound[]; experiments: ExperimentResult[]; at: string; note: string;
 };
-export function PresentationPane({ onOpen, view }: { onOpen:(view:WorkspaceView)=>void; view:WorkspaceView }) {
+export function PresentationPane({ onOpen, view, embedded=false, leagueId=defaultLeagueId, onAsk }: { embedded?:boolean; leagueId?:string; onAsk?:(prompt:string)=>void; onOpen:(view:WorkspaceView)=>void; view:WorkspaceView }) {
   const { presentation: p } = useCompanion();
   const [data,setData]=useState<Data|null>(null),[error,setError]=useState(""),[refresh,setRefresh]=useState(0);
   useEffect(()=>{
-    if(!view||view.view==='custom'||view.view==='opponents'||view.experimentId)return;const abort=new AbortController();setData(null);setError("");
+    if(!view||view.view==='lab'||view.view==='custom'||view.view==='opponents'||view.experimentId)return;const abort=new AbortController();setData(null);setError("");
     const get=async(path:string)=>{const r=await fetch(path,{signal:abort.signal,cache:'no-store'});if(!r.ok)throw Error("Evidence could not be loaded.");return r.json();};
     void (async()=>{
       const w=await get('/api/workspace');let revision:PolicyRevision|null=w.latest;
-      if (!revision && !view.revision) revision=await get("/api/starter-policy");
+      if (!revision && !view.revision && ['strategy','development'].includes(view.view)) revision=await get("/api/starter-policy");
       if(view.revision)revision=(await get(`/api/workspace?revision=${view.revision}`)).revision;
-      const result:Data={revision,versions:w.versions,standings:[],ownPlayerIds:[],entered:[],rounds:[],episodes:[],cycles:[],plans:[],at:new Date().toISOString(),note:''};
+      const result:Data={revision,versions:w.versions,standings:[],ownPlayerIds:[],entered:[],rounds:[],episodes:[],experiments:w.experiments??[],at:new Date().toISOString(),note:''};
       if(view.view==='performance'||view.view==='episodes'){
         try{const stats=await get('/api/policy-stats');result.standings=stats.standings??[];result.entered=stats.entered;result.ownPlayerIds=(stats.entries??[]).map((e:{playerId:string})=>e.playerId);
           const selected=view.revision?w.versions.find((v:PerformanceVersion)=>v.revision===view.revision):[...w.versions].reverse().find((v:PerformanceVersion)=>stats.entered.includes(v.policyVersionId))??[...w.versions].reverse().find((v:PerformanceVersion)=>v.policyVersionId);
@@ -42,14 +43,13 @@ export function PresentationPane({ onOpen, view }: { onOpen:(view:WorkspaceView)
         }catch(e){if(abort.signal.aborted)throw e;result.note='League evidence unavailable. Saved version results remain available.';}
       }
       if(view.view==='episodes')result.episodes=(await get('/api/arena')).episodes.filter((e:PracticeEpisode)=>!view.revision||e.scores.some(s=>s.policy_version_id===result.versions.find(v=>v.revision===view.revision)?.policyVersionId));
-      if(view.view==='experiments'){const research=await get('/api/research');result.cycles=research.cycles;result.plans=research.plans;}
       if(!abort.signal.aborted)setData(result);
     })().catch(e=>{if(!abort.signal.aborted)setError(e.message);});
     return()=>abort.abort();
   },[view,refresh]);
   return <section className="preston-presentation presentation-tab-panel" aria-label="Preston presentation">
     <div className="presentation-content" data-highlight={view.highlight}>
-      {!view?<p>Select a view from chat, or ask Preston to show the evidence.</p>:<><p className="presentation-reason">{view.reason}</p>{view.view==='custom'&&view.artifactId?<GeneratedView id={view.artifactId}/>:view.view==='opponents'?<Opponents initialPolicyId={view.opponentPolicyId}/>:view.view==='experiments'&&view.experimentId?<ExperimentDetail id={view.experimentId} onBack={()=>onOpen({...view,experimentId:undefined})} onVersion={revision=>onOpen({...view,view:'development',wikiPage:'evidence',revision,experimentId:undefined})} onReplay={episodeId=>window.open(`https://softmax.com/observatory/v2/episode-requests/${encodeURIComponent(episodeId)}/watch`,'_blank','noopener,noreferrer')}/>:error?<p role="status">{error} <button onClick={()=>setRefresh(n=>n+1)}>Retry</button></p>:!data?<p role="status">Loading evidence…</p>:<>
+      {!view?<p>Select a view from chat, or ask Preston to show the evidence.</p>:<><p className="presentation-reason">{view.reason}</p>{view.view==='lab'?<p>Sessions, workers, and research controls live in Preston’s Lab.</p>:view.view==='custom'&&view.artifactId?<GeneratedView id={view.artifactId} leagueId={leagueId} onAsk={onAsk}/>:view.view==='opponents'?<Opponents initialPolicyId={view.opponentPolicyId}/>:view.view==='experiments'&&view.experimentId?<ExperimentDetail id={view.experimentId} onBack={()=>onOpen({...view,experimentId:undefined})} onVersion={revision=>onOpen({...view,view:'development',wikiPage:'evidence',revision,experimentId:undefined})} onReplay={episodeId=>window.open(`https://softmax.com/observatory/v2/episode-requests/${encodeURIComponent(episodeId)}/watch`,'_blank','noopener,noreferrer')}/>:error?<p role="status">{error} <button onClick={()=>setRefresh(n=>n+1)}>Retry</button></p>:!data?<p role="status">Loading evidence…</p>:<>
       <div className="presentation-freshness">Loaded {new Date(data.at).toLocaleTimeString()} <button className="text-button" onClick={()=>setRefresh(n=>n+1)}>Refresh</button></div>
       {view.view==='performance'?<><p className="evidence-caption">{data.note}</p><PerformanceEvidence standings={data.standings} ownPlayerIds={data.ownPlayerIds} activePlayerId={data.activePlayerId} rounds={data.rounds} last={view.last} opponent={view.opponent} onRound={id=>window.open(`https://softmax.com/observatory/v2/episode-requests/${encodeURIComponent(id)}/watch`,"_blank","noopener,noreferrer")}/></>:null}
       {view.view==='episodes'?<><h3>Episodes</h3><p className="evidence-caption">{data.note}</p><div className="workspace-table-scroll"><table className="workspace-table" aria-label="Presented episodes"><thead><tr><th>Episode</th><th>Kind</th><th>Result</th></tr></thead><tbody>
@@ -59,8 +59,8 @@ export function PresentationPane({ onOpen, view }: { onOpen:(view:WorkspaceView)
       </tbody></table></div></>:null}
       {view.view==='strategy'?(data.revision?<StrategyOverview revision={data.revision} branchId={view.branchId} onSource={branchId=>onOpen({...view,view:'development',branchId})}/>:<p>No saved strategy yet.</p>):null}
       {view.view==='development'?(data.revision?<WikiPresentation revision={data.revision} view={view} onOpen={onOpen}/>:<p>No saved policy records yet.</p>):null}
-      {view.view==='experiments'?<>{data.cycles.filter(c=>!view.cycleId||c.id===view.cycleId).slice(0,6).map(c=><article key={c.id} className="presentation-investigation"><h3>{c.question}</h3><small>{c.state}</small><p>{c.criteria}</p>{data.plans.filter(plan=>plan.cycle_id===c.id).map(plan=><p key={plan.id}><b>{plan.status}</b> · {plan.objective}</p>)}<button className="text-button" onClick={()=>onOpen({...view,cycleId:c.id})}>Inspect investigation ↗</button></article>)}{!data.cycles.length?<p>No investigations yet. Preston can start one from this conversation.</p>:null}</>:null}
-      </>}<div className="presentation-actions">{view.view!=="custom"?<button className="secondary" onClick={()=>onOpen(view)}>Open in workspace ↗</button>:null}<label><Checkbox checked={p.follow} onCheckedChange={checked=>p.setFollow(checked===true)}/>Follow Preston</label></div></>}
+      {view.view==='experiments'?<ExperimentResults experiments={data.experiments} loading={false} error="" onInspect={experimentId=>onOpen({...view,experimentId})} onLab={()=>onOpen({...view,view:'lab'})}/>:null}
+      </>}{!embedded?<div className="presentation-actions">{view.view!=="custom"?<button className="secondary" onClick={()=>onOpen(view)}>{view.view==='lab'?'Open Lab ↗':'Open in workspace ↗'}</button>:null}<label><Checkbox checked={p.follow} onCheckedChange={checked=>p.setFollow(checked===true)}/>Follow Preston</label></div>:null}</>}
     </div>
   </section>;
 }

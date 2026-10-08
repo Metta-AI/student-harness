@@ -40,6 +40,7 @@ await page.route('**/*', async route => {
 });
 try {
   await page.goto(baseURL);
+  await page.getByRole('button',{name:'Preston’s Lab',exact:true}).click();
   await page.getByRole('tab', { name: 'Opponents', exact: true }).click();
   const roster = page.getByRole('region', { name: 'Opponent policies', exact: true });
   const first = roster.getByRole('button', { name: 'Tower Power', exact: true });
@@ -67,7 +68,7 @@ try {
   await secondAnalysis.getByText('No saved analysis yet', { exact: true }).waitFor();
   assert.equal(await first.getAttribute('aria-expanded'), 'true', 'Multiple opponents stay expanded');
   await second.locator('xpath=ancestor::tr').getByRole('button', { name: 'Analyze', exact: true }).click();
-  await second.locator('xpath=ancestor::tr').getByRole('button', { name: 'View session ↗' }).waitFor();
+  await second.locator('xpath=ancestor::tr').getByRole('button', { name: 'Inspect in Lab ↗' }).waitFor();
   assert.equal(writes.length, 1); assert.equal(writes[0].context.policyId, profiles[1].policyId);
   assert.equal(await second.getAttribute('aria-expanded'), 'true', 'Action buttons do not toggle the row');
   thirdAnalyzed = true;

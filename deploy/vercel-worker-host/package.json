@@ -1,0 +1,9 @@
+{
+  "name": "student-harness-worker-host",
+  "private": true,
+  "type": "module",
+  "description": "Vercel-hosted supervisor for the student-harness SQL-journal policy workers: a cron keeps one named Vercel Sandbox running scripts/container-policy-service.mjs from a pinned commit.",
+  "dependencies": {
+    "@vercel/sandbox": "3.5.1"
+  }
+}

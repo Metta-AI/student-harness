@@ -1,4 +1,0 @@
-apiVersion: v2
-name: student-harness-container-worker
-version: 0.1.0
-description: Explicitly enabled SQL-journal container policy reconciliation workers

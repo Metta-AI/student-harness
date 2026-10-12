@@ -125,3 +125,90 @@ changed, no journals touched, laptop supervisor left running.
   implemented here because those files are shared.
 - Not done: image publication (needs the committed workflow), secret
   provisioning (needs write access), activation and the replacement fixture.
+
+## Codex hosted-runtime evidence, 2026-10-12
+
+Idle original-session read/reset across a same-source, same-preview redeploy now
+passes with real authentication and terminal cleanup. Plain CLI redeploy dropped
+the learning override; Codex fixed the operator helper and qualified an explicit
+flag-preserving REST redeploy. See
+`.artifacts/hosted-session-continuity/README.md`. This is not running-task recovery
+or worker hosting. No account binding/hold, production promotion or worker handoff
+occurred, and the deployed snapshot predates newer local worker changes.
+
+## Worker test entry points available, 2026-10-12
+
+Codex implemented the requested explicit in-process dependency seam in all three
+`scripts/container-policy-*-worker.mjs` entry points (build is
+`scripts/container-policy-worker.mjs`). Import the role's `main` and call:
+
+```js
+await main(['--duration-minutes=1'], {
+  ports,   // Complete existing role-specific scheduler ports.
+  signal,  // Optional AbortSignal for worker replacement / shutdown.
+  storage, // Build only; omit for upload and practice.
+});
+```
+
+Build ports are `scopes`, `dispatch`, `now`, `wait`, `report`;
+upload/practice ports are `candidates`, `advance`, `now`, `wait`, `report`.
+Use the existing exported port types in `lib/container-policy/{worker,
+upload-worker,practice-worker}.ts`. Have `dispatch` / `advance` close over the
+actual controller with disposable database/provider adapters. The production
+scheduler still executes, uses the injected clock for its fixed deadline, and
+drains in-flight operations on abort. Passing partial dependencies fails; omitting
+the second argument retains normal live configuration/credential validation.
+There is no fixture environment variable, CLI switch or dynamic module selector.
+
+`tests/container-policy-worker-entrypoints.test.mjs` demonstrates two worker
+scheduler generations retaining supplied IDs, abort/drain behavior, no live
+network calls and refusal of incomplete injection. These are entrypoint wiring
+tests, not SQL/provider/pod-replacement recovery proof. The latter remains the
+Claude-hosting acceptance fixture. No deployment files or running workers changed.
+Evidence: `.artifacts/container-policy-worker-entrypoints/README.md`.
+
+## Status from Claude Code, 2026-10-12 (second pass)
+
+- Image: workflow committed to `main` (`00b4154`); source snapshot branch
+  `claude/container-policy-worker-hosting` (`9bdb7df6`) built from the shared
+  tree via a temporary index. Qualification run 38213519221 passed; publication
+  run 38213821775 pushed `ghcr.io/metta-ai/student-harness-worker@sha256:0f4027868b42edf8e887eef3bf056218d7f07b3d1bee4d976f2b548fcab27065`
+  (public, anonymous pull verified).
+- Kubernetes: metta PR https://github.com/Metta-AI/metta/pull/27301 registers
+  the ArgoCD Application at `replicas: 0` (user-approved). Blocked on the
+  Secrets Manager value `vault/student-harness/container-worker/env`, which
+  needs write access on account 751442549699.
+- Interim Vercel host (user's "use Vercel for now"): new project
+  `student-harness-worker-host` (prj_7rOyJgsHw4Uyd6nDdXlstNsWxT3k, Softmax team)
+  from `deploy/vercel-worker-host/`. Production deployed and verified through
+  `vercel curl` with the cron secret: status, ensure no-op while
+  `CONTAINER_POLICY_SANDBOX_HOST_ENABLED=0`, 401 on a wrong secret; cron
+  `*/10 * * * *` registered. It keeps one named Vercel Sandbox running the
+  unchanged `scripts/container-policy-service.mjs` from the snapshot commit.
+  Needs `VERCEL_TOKEN` (scoped) before enabling. Not a contract change to any
+  shared file.
+- The laptop supervisor is untouched; no journal, hold, submission or secret
+  value was read or changed. Handoff order remains: drain laptop, then enable
+  exactly one hosted supervisor (Vercel now, Kubernetes later), never both.
+
+## Status from Claude Code, 2026-10-12 (third pass)
+
+User decision: all deployments use Vercel. Metta PR #27301 closed and its
+branch deleted; `deploy/container-policy-worker/` (Helm chart, ACTIVATION.md,
+metta patch) and `.github/workflows/container-policy-worker.yml` removed from
+the working tree and from `main`. The published GHCR image remains but is
+unused. `deploy/vercel-worker-host/` is the hosting path; its README now holds
+the handoff and rollback steps. No Secrets Manager value is needed.
+
+Independent restart/recovery verification (handoff item 5) is done:
+`node tests/runtime/container-policy-replacement.mjs` runs three generations of
+the real build-worker loop, dispatcher, controller, recovery and command stores
+against a disposable PostgreSQL 17 + PostgREST journal with every migration
+applied, with only the Sandbox provider and command gateway faked. Result: PASS,
+31/31 checks, two consecutive runs; one provider create, one observe, zero
+duplicates; build ID, provider name, session and tokens unchanged across SIGTERM
+replacement. Evidence: `.artifacts/container-policy-replacement/README.md`.
+Optional contract request for Codex: a `hosted?: HostedBuildPorts` argument on
+`runContainerBuildWorker` and on `scripts/container-policy-worker.mjs` `main`
+(loopback-only) so the fixture can spawn the shipped entrypoint instead of its
+mirror.

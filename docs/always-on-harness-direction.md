@@ -73,11 +73,12 @@ are the lecture's harness refinements and are cheap once 1 to 3 exist.
    build to the existing Vercel project with its minute and daily crons, set
    `PRESTON_RUNTIME_OWNER` and `PRESTON_RUNTIME_URL`, and route
    `ide.softmax.com` per `ide-deployment.md`. Codex owns this.
-3. **Host the policy workers off the laptop.** EKS `main`, one Deployment, ESO
-   secret, ArgoCD registration from metta. Assets are complete and validated;
-   see `deploy/container-policy-worker/ACTIVATION.md` for the exact blocking
-   permission and the pull-request path that needs no personal cluster write
-   access. Claude Code owns this.
+3. **Host the policy workers off the laptop.** One named Vercel Sandbox runs
+   the unchanged supervisor from a pinned commit, kept alive by a cron in the
+   separate `student-harness-worker-host` project; see
+   `deploy/vercel-worker-host/README.md`. Deployed, disabled until a scoped
+   Vercel token is set and the laptop supervisor is drained. Claude Code owns
+   this.
 4. **Acceptance demo for always-on.** The design doc's first demonstration: mark
    a replay moment, authorize a bounded investigation, close the laptop, let the
    hosted cron and worker finish, reopen, see the result attached to that moment

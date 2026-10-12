@@ -1,0 +1,15 @@
+/* Workspace-header entry into Preston's brain and the other pages. Matches the
+   existing account menu so the two read as one family of controls. */
+.trigger { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 30px; margin-left: auto; padding: 0 9px; border: 1px solid var(--input); border-radius: 7px; background: transparent; color: var(--foreground); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.trigger:hover, .trigger[data-state="open"] { background: var(--secondary); }
+.trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.trigger:disabled { opacity: .45; cursor: default; }
+.trigger > svg:first-child { color: var(--accent-foreground); }
+.content { width: 300px; }
+.label { padding: 8px 10px 2px; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-foreground); }
+.item { display: grid !important; gap: 2px; align-items: start; }
+.item span { font-size: 12.5px; }
+.item small { font-size: 11px; line-height: 1.4; color: var(--muted-foreground); }
+.item[data-highlighted] small { color: inherit; }
+/* The shell header is dense; below a wide desktop the trigger is icon-only (its accessible name stays). */
+@media (max-width: 900px) { .trigger span { display: none; } .trigger { padding: 0 7px; } }

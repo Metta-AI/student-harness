@@ -1236,3 +1236,290 @@ execution holds and bindings remain unchanged; no live review/game/model/native
 action or production promotion was performed. The full capability goal remains
 unproven; broader hosted lifecycle, live coaching quality, native delivery and
 other gaps in the capability table remain open.
+
+## Status from Claude Code, 2026-10-12 (activation)
+
+- The laptop supervisor (PID 12114) was drained with SIGTERM at 13:58 UTC while
+  the journals were idle (no active builds or practices; the only upload row is
+  the completed Strategist upload `08cd51ce…`). It was not restarted.
+- The hosted supervisor is active: Vercel project `student-harness-worker-host`,
+  `CONTAINER_POLICY_SANDBOX_HOST_ENABLED=1`, named Sandbox
+  `preston-policy-workers` (session `sbx_DPKJwrKozsyY3VpfYv97dwDRIlmw`, 12 h
+  lease, created 14:02 UTC) running the unchanged supervisor from commit
+  `10d13ac7`. Builder sandboxes are created in the `student-harness` project
+  with a token scoped to that project.
+- Root cause of the first activation failure: Vercel's system variable
+  `VERCEL_PROJECT_ID` shadowed the configured builder project. Fixed by reading
+  `CONTAINER_POLICY_VERCEL_PROJECT_ID` in the host and forwarding it to the
+  sandbox as `VERCEL_PROJECT_ID`.
+- No journal row, hold or submission was changed. Real journal processing on the
+  hosted path will be proven by the next student build/upload/practice.
+
+
+## Practice assessment and shared evidence preview verified — 2026-10-12 14:03 UTC
+
+READY protected preview:
+https://student-harness-epafsvfcx-softmax-3ba1c1cc.vercel.app
+(`dpl_ATzbtcnxFD42rSMhtXc9Lyx4B9kJ`). All856 uploaded paths match qualified
+build9e943005; frozen source SHA256
+`3170e545bc25a096b6d47c82982a395fd2feb03d06405cbadd9bb5a3c46ab9d1`.
+This preview includes completed practice → human study assessment and the shared
+verified practice evidence reader for chat/voice. It supersedes the preceding
+section's in-progress deployment status.
+
+Twelve routing checks pass; authenticated runtime ownership, exact recovery
+origin, generic-learning enablement and prior13-event completed-chat reads pass.
+The new practice preparation endpoint returns authenticated404 for a missing
+practice,400 without its ID and anonymous401, all no-store. Study/review/findings
+guards also pass. The selected live league has no studies: populated assessment
+and chat/voice evidence remains the local browser and actual disposable-database
+qualification described above, not live game/model/audio proof. Background work
+remains held. No primary schema/control writes, live model/game/native actions
+or production promotion occurred. All qualification processes exited cleanly.
+
+Evidence: `.artifacts/practice-learning-preview/{build-source-match.json,deploy/journal.jsonl,routing.jsonl,readback.json,hosted-practice.json}`.
+Full capability goal remains unfinished; the capability table retains its open
+requirements.
+
+
+## Cross-game evaluation exports — qualified locally, 2026-10-12
+
+Selected study entries can now become reviewed evaluation cases in webDiplomacy
+and other enabled games as well as GoTA. Account, league and study scope are
+retained through the page and export route. Selected metadata reads share one
+deadline and exclude private replay notes, source and full practice receipts.
+Practice availability stays unknown. Automatic desktop aliases are deduplicated;
+explicit references survive. Downloaded pretty JSON is limited to 256 KiB, matching
+the offline assessor. Changing account, league or study resets review state.
+
+Evidence: `.artifacts/generic-evaluation-export/final-report.json`. 37 focused
+tests, eight actual disposable PostgreSQL/PostgREST tests, seven headless browser
+scenarios and independent review pass. Build `70e605a6-5441-4f74-85cc-fce8bfa52144`
+passes Next/Eve compilation and loopback routing. All evidence production hashes
+match that build. Temporary services were cleaned. No primary writes, migration,
+live model/game/native action or hold/binding change. The existing protected
+preview predates these exports; this is local qualification. Full goal remains
+active. Subsequent readiness guidance, regression corpus and study paging work
+is separate from this frozen qualification.
+
+
+## Assessment readiness, offline regression and older studies — local, 2026-10-12
+
+Evaluation previews now show the exact latest selected Preston answer and local
+assessment readiness. Missing answers, omitted corrections and later selected
+context have concrete explanations; source-only files remain downloadable after
+review. Ready examples remain ungraded. No provider path was added to the UI.
+
+The new `npm run check:learning-corpus -- --manifest FILE --output NEW_FILE`
+checks up to 50 reviewed local cases against supplied human expectations. It
+binds saved assessments to case/target/contract/prompt digests, revalidates exact
+citations and recomputes judgments. Missing, failed and invalid reports cannot
+pass as model results. Input sizes and regular-file reads are bounded; symlink
+escapes, FIFOs, input overwrite and existing outputs are rejected. Summaries
+contain counts and source fingerprints without case text. Labels, report origin
+and semantic correctness remain unverified; this is not agent replay or training.
+
+Completed-practice assessment now offers explicit Older studies. Account/league/
+active filters precede 50-row keyset pages; timestamp ties use the study ID.
+The UI retains at most 200 options before batch replacement and pins the selected
+study. Failed pages, unsent reasoning and original uncertain-save bodies/keys
+survive retries/reloads. Predictions keep their independent cursor. Concurrent
+edits can move studies between pages; this is current browsing, not a snapshot.
+
+Combined evidence: `.artifacts/learning-regression-progress/final-report.json`.
+Nine actual disposable database tests, nine export-browser scenarios, eleven
+practice-browser scenarios, seven paging tests and five corpus tests pass. The
+CLI rechecked eight previously saved synthetic cases, including four original
+model assessments, without inference. Independent review and TypeScript pass.
+Next/Eve build `32d69e81-59f4-4b87-9997-4071cb584736` and loopback routing pass;
+all evidence production hashes match it. Temporary services are cleaned.
+
+These changes are local, not included in the last protected preview. No primary
+write, schema migration, live model/game/native effect, execution-hold/binding
+change or production promotion. Full capability goal remains active; hosted
+lifecycle recovery, broader model/coaching quality and native delivery remain
+open in the capability table. Claude still owns hosted policy workers.
+
+## Status from Claude Code, 2026-10-12 (IDE navigation)
+
+User request: better navigation in the IDE and a way to look into Preston's
+brain. Added `components/navigation/` (destinations list, `SiteNav`,
+`PagesMenu`) and two one-line insertions in shared files: `app/layout.tsx`
+renders `<SiteNav/>` (it returns null on `/`, so the workspace shell is
+unchanged), and `components/student-app.tsx` renders `<PagesMenu/>` in the
+header after the mode switch. The destination list is the single source for
+both surfaces: Work (Workspace, Lab via `?view=lab`), Preston's brain (Shared
+memory, Learned procedures, Updates), Computers (Browser, Desktop), Account
+(Connections, External sources, Usage, Settings). Existing ad-hoc
+"← Workspace" links on secondary pages were left in place.
+Also removed the duplicate local header (brand + "Back to workspace") from
+`components/user-settings.tsx`, since the site navigation now provides both.
+
+
+## Ongoing delivery isolation and exact procedure continuity — 2026-10-12
+
+The previous goal turn was progress (cross-game evaluation exports, offline
+regression checks and older-study browsing). This turn fixes two continuity gaps.
+Research wake control failures and task lookup/receipt failures no longer abort
+the remaining claimed batch. Each item retains existing attempt/lease behavior;
+foreign-runtime claims remain untouched. Failures are aggregated after processing
+later items, and saved retry diagnostics are sanitized. No within-pass resend.
+
+Learned procedures now return exact active and explicitly requested historical
+versions separately from the newest 20 history rows. Chat and signed voice no
+longer lose the human-selected version after many drafts. Exact owned version
+links fail closed instead of substituting another draft. Current source lessons
+resolve under the shared ten-second read deadline. UI selection rejects stale
+refreshes, resets trial judgment and hydrates the selected source before revision;
+a corrected source can be repaired using another current lesson.
+
+Qualification: 25 focused scheduler tests, 16 procedure tests, TypeScript and
+headless GoTA/webDiplomacy workflows pass. Five real disposable PostgreSQL/
+PostgREST tests cover 25 newer drafts, distinct archived source lessons, discovery,
+HTTP, signed voice, corrections and foreign scope. The actual production-compiled
+cron completes two automatic minute ticks across SIGKILL/process replacement,
+three synthetic tasks and one research completion, with injected control/lookup/
+receipt failures and foreign-owner claims. Earlier diagnostic callback-binding
+failures remain recorded as failed fixtures; the final run uses Eve's documented
+session initiator attributes. All temporary services were cleaned.
+
+Evidence: `.artifacts/companion-continuity-progress/local-report.json`. Next/Eve
+build `94604251-9429-4613-96c9-34e3a8f1a0ab` and loopback routing pass. Applicable
+production fingerprints match the build. The database report also fingerprinted
+two unexecuted frontend files subsequently fixed; current frontend qualification
+is the final browser/page tests and build, not that earlier database fingerprint.
+
+A frozen protected-preview upload is in progress under
+`.artifacts/learning-regression-preview/deploy-after-refresh/journal.jsonl`. The
+first attempt failed before creation because the CLI token expired; existing CLI
+authentication refreshed successfully. No primary writes, migration, account
+hold/binding changes, live model/game/native actions or production promotion.
+No claim of hosted cron delivery or in-flight recovery follows from local cron
+evidence. Full goal remains active. Next identified gap: procedure applicability
+only has free-text scope; current evidence availability does not compare current
+game release/manifest/source with saved procedure evidence. That needs a shared
+explicit matching/different/unknown projection before claiming safe reuse across
+release changes. Broader hosted lifecycle and native delivery remain open.
+
+
+## Learning and procedure continuity preview verified — 2026-10-12 14:54 UTC
+
+READY protected preview:
+https://student-harness-mbtsqk78q-softmax-3ba1c1cc.vercel.app
+(`dpl_G4esbA6faFvEb29U41TtZHj2qwb1`). All 863 uploaded paths match qualified
+build `94604251-9429-4613-96c9-34e3a8f1a0ab`; frozen SHA256
+`f3134b699d6f4190d6dc987072e354255553298e51e94df308e76c42fcc7fe11`.
+Includes cross-game evaluation exports/readiness, offline corpus command, older
+study browsing, per-item scheduler isolation and exact active/historical
+procedure retrieval. This supersedes the preceding upload-in-progress status.
+
+Twelve routing checks pass. Authenticated runtime owner, runtime scheduler role,
+generic learning and exact recovery origin are verified, and the existing
+13-event completed chat remains readable. Skills, study/review/findings and
+practice reads retain scope and anonymous guards. Invalid explicit procedure
+versions and incomplete study cursors return 400/no-store. The selected live
+league contains no studies or skills; populated behavior remains the actual
+disposable-SQL and local headless qualification, not live model or hosted job
+proof. Execution is still held. No primary control/schema writes, task/model/game/
+native actions or production promotion. All deployment/readiness handles exited.
+
+Evidence: `.artifacts/learning-regression-preview/{build-source-match.json,deploy-after-refresh/journal.jsonl,routing.jsonl,readback.json,hosted-learning.json}`.
+The first `deploy/` journal records a preflight failure with no creation, followed
+by normal existing CLI credential refresh. The later journal owns the only new
+deployment. Full capability goal remains active with the broader unresolved
+requirements in the table above.
+
+
+### 2026-10-12 — procedure release comparison
+Codex added a separate exact-version release comparison to learned procedures;
+backend, UI and independent resolver/review agents are finished. Current evidence
+availability is unchanged. Fully verified pinned evidence can compare against the
+selected league’s authenticated manifest; missing/mixed/corrected evidence stays
+unknown and current policy-source compatibility is explicitly unknown. No SQL
+migration or primary mutation. 36 focused, 6 disposable SQL, 10 UI cases and both
+league procedure workflows pass. Build/preview progress is recorded under
+`.artifacts/skill-release-progress/report.json`. Claude still owns hosted policy
+workers. No Electron/native launch, live model/game action, hold change or
+production promotion. Full goal remains active.
+
+Release comparison preview READY and read-only verified:
+`dpl_6XePLgiVR4t1evchmjuDStSJJ8M4`,
+https://student-harness-lau564sg3-softmax-3ba1c1cc.vercel.app.
+Build `4b703642-5f8c-4410-af67-b78873c7f884`; 866 uploaded paths match it.
+Runtime owner remains `preview:65aedf69-72df-44dd-a591-d8c50e509479`, role runtime,
+recovery origin matches, existing completed session readable, execution held.
+All handles exited. Next gaps: verified selected policy-source context,
+semantic/coaching-quality evaluation and broader hosted/native lifecycle proof.
+Do not duplicate the original submitted Strategist or enable live work.
+
+
+### 2026-10-12 — conversation evaluation and inbox account isolation
+Codex backend, workspace UI and independent review work finished. Conversation
+cases select original durable events, pin a completed answer, redact reviewed
+excerpts and download locally. They reuse the offline assessor/corpus with a
+separate contract; no session replay or provider/training authorization is implied.
+Inbox paging/read receipts now fence account switches and late responses.
+34 conversation tests, nine inbox tests, ten export browser cases, six inbox
+account cases and two existing browser regressions pass; TypeScript and isolated
+Next/Eve build pass. Reports: `.artifacts/conversation-evaluation-progress/`.
+The frozen protected preview source matches build
+`1429a29e-f8e2-473e-a480-0cd8b259b0b9` (873 paths). Deployment/readiness pending
+in that report. Claude still owns hosted policy workers. No live work was enabled,
+no primary writes or native launches occurred, and the full goal remains active.
+
+
+Conversation evaluation preview READY and read-only verified:
+https://student-harness-7kpzxj21b-softmax-3ba1c1cc.vercel.app
+(`dpl_G26FizJoD5mx41HT7N1DtCUaMUWp`). All 873 uploaded source paths match the
+qualified build; frozen SHA256
+`198c34ca06c75895115acdd38ee89415a7491337ab1bb083dfe53ec4061471e5`.
+Twelve routing checks, authenticated runtime configuration, exact recovery origin,
+the existing completed 13-event session, conversation anonymous/missing/invalid
+scope guards and account-discriminated inbox reads pass. Populated conversation
+export remains local fixture proof. Execution stays held; no production promotion
+or primary writes. Deployment and readback handles exited. Evidence:
+`.artifacts/conversation-evaluation-progress/report.json`. Full goal remains active.
+
+
+### 2026-10-12 — explicit saved-source comparison
+Codex added exact owned saved revision comparison to learned procedure versions,
+with the same read-only operation available to chat and signed voice. BASIC bytes
+and release-scoped container bundles remain distinct identity types. Existing
+activation/reuse authority is unchanged. Missing/unpinned/mixed/corrected evidence
+stays unknown. Root actualSQL8, independent actualHTTP6, UI8 and releaseUI10 pass;
+backend/tool regressions and typecheck pass. No new migration/primary/native/model
+effects. Progress/build/preview evidence: `.artifacts/skill-source-progress/`.
+Claude still owns hosted policy workers; do not duplicate original Strategist or
+enable held work. Full capability goal remains active.
+Follow-up (user): "Preston's Lab" removed from the navigation destinations
+(it is the workspace); the shell's own Workspace/Lab mode switch is untouched
+and is Codex's to retire. Added history back/forward carets, the Softmax
+brandmark (`public/brand/softmax-mark.svg`, inlined in
+`components/navigation/brand-mark.tsx`) in both the site nav and the shell
+brand, and a desktop variant: inside Electron (user agent) the nav drops the
+wordmark since the title bar already carries it.
+
+
+Saved-source comparison preview READY and read-only verified:
+https://student-harness-hm0e2fgas-softmax-3ba1c1cc.vercel.app
+(`dpl_7yQdVzsmCMk1wEiyPbaXV9Hsrt2W`). 877 uploaded paths match build
+`970252eb-f4c0-42d8-831c-2c06bde16650`; source SHA256
+`2f6f1cc0c28db8d53823bb82d992cf75cbb5341cfe3f34ead34830d233fde364`.
+Routing, runtime identity/recovery, prior completed session, bounded owned source
+metadata list and invalid/anonymous source guards pass. Populated source comparison
+is actual disposable database proof, not a hosted model trial. Execution remains
+held. All handles exited; no production promotion. Full goal active.
+The user subsequently emphasized app-wide game independence; the next work audits
+and removes remaining shared-path GoTA assumptions while retaining real adapters.
+Follow-up (user): the shell's Workspace / Preston's Lab mode switch is removed
+from `components/student-app.tsx` (the `labMode` state and lab tab strip remain
+for sessions opened from History or Updates; the brand link returns home). The
+site nav now shows Workspace plus one dropdown per group instead of inline
+sections. Desktop: the title-bar "+" is now "New workspace" (`desktop/app/
+shell.html`, `shell.js`, `main.cjs` action `new` and File → New Workspace ⌘N),
+loading the app home at "/"; "Open Recording…" stays on the File menu and the
+offline page. Desktop changes are syntax-checked only; Electron was not launched.
+Aligned with the new root routing (`/` = game library, `/?league=` =
+workspace): the nav's Work group is Games plus Workspace when a league is
+known; the desktop "+" keeps the current league when opening a fresh workspace
+and otherwise opens the game chooser.

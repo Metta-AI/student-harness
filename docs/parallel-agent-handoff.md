@@ -1523,3 +1523,360 @@ Aligned with the new root routing (`/` = game library, `/?league=` =
 workspace): the nav's Work group is Games plus Workspace when a league is
 known; the desktop "+" keeps the current league when opening a fresh workspace
 and otherwise opens the game chooser.
+
+## Status from Claude Code, 2026-10-12 (Softmax IDE release and production)
+
+- Desktop app renamed to Softmax IDE with the brandmark icon set
+  (`desktop/build/icon.icns`); user data moves once from "Softmax Prototype"
+  to "Softmax IDE"; packaged builds default to the hosted server
+  `https://student-harness-seven.vercel.app` (dev keeps localhost;
+  `SOFTMAX_DESKTOP_URL` overrides). Packager builds arm64 and x64.
+- GitHub release `desktop-v0.1.0` on `Metta-AI/student-harness` carries both
+  unsigned zips and checksums; tag points at snapshot branch
+  `claude/container-policy-worker-hosting`. `.github/workflows/desktop-release.yml`
+  (on `main`, commit 2977d38) rebuilds and attaches on future `desktop-v*` tags.
+  No signing identity exists on this machine; install needs the quarantine
+  removal documented in `desktop/README.md`.
+- Production: the 9-hour-old production build lacked `/updates`, `/memory`,
+  `/usage`, `/browser` and `/api/desktop/*`, which the desktop app needs. I
+  deployed the current working tree to a preview, verified those routes, and
+  promoted it. A separate production deployment (`dd0gatjsx`, 09:16 PDT) landed
+  at the same time from this account; if that was yours, note that production
+  now serves the later promoted build. Please coordinate production deploys
+  through this file to avoid overwriting each other.
+
+
+## Game-independent shared app — locally qualified, 2026-10-12
+
+The home page now opens a neutral live game chooser. Every workspace URL carries
+an explicit league, including GoTA. The companion requires its caller's league;
+shared research, rounds, replays, evidence, voice history and conversation linking
+preserve account and league. Saved research loads at most twelve references per
+manual batch with three concurrent reads, exposes continuation beyond twelve,
+and excludes stale or foreign responses. Generic instructions now advertise
+shared research and supported views without assuming BASIC or GoTA scoring.
+
+Desktop recordings require an explicit league before sharing or control. The
+immutable association propagates through moments, grants, commands, frames,
+research events, study evidence and reference-only exports. Legacy records stay
+GoTA. Voice history uses bounded pages and human-selected same-league links;
+uncertain acknowledgements are recovered by reading the original call.
+
+Evidence index: `.artifacts/game-generalization/report.json`. Final credential-free
+Next and Eve production builds pass (`38430e82-cc74-4d86-88f4-eb7459978ba3`), including
+compiled neutral/invalid/generic entry routes and local Next→Eve routing. Desktop
+qualification passes44 SQL/PostgREST checks and35 focused checks; the final desktop
+route signature adjustment passes7 route tests. Scoped workspace suite23, catalog
+browser5, research continuation browser6, league browser7, desktop renderer4 and
+voice continuity28+1 checks pass, alongside scoped agent/tool suites. Counts are
+separate suites and may overlap. The final production build supersedes earlier
+reports' temporary voice typecheck failures. Build also caught and fixed a global
+navigation selector in a CSS module and an optional Next route Request parameter.
+
+**Rollout pending:** apply `20261012160043_desktop_replay_league_scope.sql` before
+new desktop readers. Migration SHA256:
+`6b223b90a37eee9d52f7fae3d521e5745f5c1a67d49abe9ea2ec4d8bd44dbd61`.
+It was qualified after the captured104 migration ledger in a disposable database;
+it has not been applied to the primary database. No deployment, native application,
+model, game, policy submission or primary control change occurred. Execution stays
+held. All owned diagnostic children were cleaned up. Real game adapters remain
+necessary for game-specific execution and outcome semantics. Full goal is active.
+
+## Status from Claude Code, 2026-10-12 (session review fixes)
+
+User reviewed conversation `-X1a4RFE_tT7` (webDiplomacy). Three defects, all
+fixed in shared files (please review):
+
+- Preston asked the student to paste `strategist:v1` although the IDE stores
+  it (`container_policy_revisions`), because no tool could list saved
+  revisions. Added `listContainerRevisions` in `lib/container-policy/store.ts`,
+  a `list` action on `agent/tools/container_policy_source.ts` (revisions with
+  file paths, latest build and upload), and a game-scope instruction to list
+  before asking. Verified against the account: three revisions, one built and
+  uploaded as `strategist` v1.
+- The queued research task showed "No worker is assigned… Runtime setup is
+  needed" while the real cause was the account's manual background hold
+  (`research_execution_controls.held=true` since 2026-10-09). With no
+  `PRESTON_RUNTIME_OWNER` configured the legacy dispatcher runs unbound tasks,
+  so `lib/tasks/execution-readiness.ts` now reports `unbound` only when an owner
+  is configured, and otherwise checks the hold. Copy in
+  `lib/tasks/start-availability.ts` says what is happening; the session panel
+  offers "Resume this session" (recovery `trial`) inline. Test added.
+- Voice history rendered in every conversation; it now renders only when the
+  account has a saved voice call in the league.
+
+
+## Game-independent rollout — preview verified, 2026-10-12
+
+This supersedes the earlier pending-rollout note. The primary ledger now contains
+105 migrations: exactly `20261012160043_desktop_replay_league_scope.sql` was added
+at 16:38:55 UTC. The reviewed helper passed eleven disposable-database cases and
+preserved 46 relations inside the migration transaction. The original ledger,
+account hold and runtime bindings are unchanged. A wider readback saw three
+independent `task.wake` appends before the migration; every original row was
+unchanged. Both the raw comparison and its verified resolution are retained.
+
+Preview: https://student-harness-71kdndo0r-softmax-3ba1c1cc.vercel.app
+(`dpl_2QUMvuyrEYR2YirJ7TJbdjKqoSzT`). Its 886 uploaded paths match production build
+`5dfefaca-9af5-4ae4-9fd1-2c4106b54d58`; source SHA256
+`17dbc5d2bae0ffac11da3fe3a5132f1e6392b1204e11e673bc4570ef3570e407`.
+Hosted checks verify neutral/generic entry pages, scoped voice/desktop reads,
+invalid/anonymous guards, runtime identity and the prior completed conversation.
+Twelve rejected routing checks pass; eight saved-skill/source integration cases
+also pass against the 105-migration database. Empty hosted voice/device lists
+prove read contracts, not populated workflows or native operation.
+
+**Deployment boundary:** old deployments have unscoped same-account desktop reads.
+They can display future generic desktop evidence in their GoTA surface. New SQL
+fences legacy command/study attachment, but does not retrofit old table readers.
+No generic desktop records were created in this rollout. Retire/protect those
+origins before claiming cross-deployment isolation or doing that live demo.
+
+Evidence index: `.artifacts/game-generalization-rollout/report.json`.
+No production promotion, hold release, model/game effects or native launch. The
+full capability goal remains active; live populated cross-game workflows,
+laptop-off execution and native acceptance remain to be demonstrated.
+
+## Status from Claude Code, 2026-10-12 (research limits lifted)
+
+User decision: no rationing of background research while the product is
+being made to work; cost control stays with the daily credit ledger only.
+- New migration `20261012170000_research_release_uncapped.sql`, validated on a
+  disposable database with all 109 migrations and **applied to primary**
+  (ledger row inserted): `research_execution_control` gains `release`
+  (held=false, reason `released`); `trial` no longer caps steps (1,000,000)
+  or time (30 days); `agent_tasks.max_model_calls` check widened to 6..5000;
+  `research_execution_controls.remaining_calls` check widened accordingly.
+- `lib/tasks/model.ts` default `maxModelCalls` 200 (max 5000);
+  `app/api/research/recovery` accepts `release`; research controls show
+  "Resume all background research"; the session panel's "Resume this session"
+  uses the uncapped trial.
+- Released the user's account hold (set manually on 2026-10-09) and raised the
+  queued research task `aa99a25c` to 400 calls so the local dispatcher can run it.
+Follow-up (user): removed the composer's mode dropdown (Ask Preston / Learn /
+Do / Create a view) and its sparkles icon from
+`components/workspace/workspace-composer.tsx`; suggestion chips still set
+their own mode, and the "Develop a strategy" chip uses a route icon instead of
+sparkles. Production was promoted twice today from this tree (readiness and
+research-limit fixes, then this composer change).
+
+
+## Scheduler progress under failures — locally qualified, 2026-10-12
+
+The previous goal turn completed the game-independent preview rollout. This turn
+fixes two concrete lifecycle defects instead of treating that read-only deployment
+qualification as proof of client-independent execution.
+
+Research plan dispatch now isolates each plan's control read, admission and waiting
+receipt. A failing high-priority plan no longer prevents later plans in the same
+batch from being visited. Each admission keeps its original ID and gets at most
+one attempt per pass; a sanitized aggregate failure remains visible after the
+batch. Reconciliation/read/resume prerequisites still stop an unverified batch.
+
+Computer dispatch filters active job leases, considers at most ten ordered
+candidates and skips lost claims, while preserving the one-claimed-computer
+budget. An actual PostgREST test exposed SQL NULL composites encoded as objects
+with all fields null. Both direct and scheduled reconciliation now normalize
+that response; mismatched or malformed claim receipts cannot reach the provider.
+
+Evidence: `.artifacts/scheduler-progress/report.json`. The compiled production
+cron ran automatically without a client, admitted a healthy plan after three
+failing predecessors, and resumed task delivery after SIGKILL/process replacement.
+Two real PostgreSQL/PostgREST cases on captured105 pass, preserving active leases,
+original physical/request identities and account controls. They also show terminal
+rows are not repolled and later candidates remain untouched after one claim.
+Focused suites (8 research, 13 scheduler, 20 computer, 19 route/role regressions),
+typecheck and isolated Next/Eve production builds pass. The initial failing SQL
+wire test is retained alongside the passing result.
+
+These fixes are not deployed yet. Cron qualification uses local fixture domain
+services and a synthetic model; database qualification mocks only the provider
+boundary. Neither proves hosted laptop-off work, real VM shutdown or lost-ack SQL
+recovery across passes. No primary write, hold release, model/game effect or native
+launch occurred. Full goal remains active; the existing preview is unchanged.
+
+
+## Scheduler fixes — verified preview and current production gate, 2026-10-12
+
+The two scheduler fixes are now deployed to the protected preview
+https://student-harness-ojrtmcm0e-softmax-3ba1c1cc.vercel.app
+(`dpl_3yXHaHDZvyC46nKpcsNKZ8QZ6Qan`). All 886 uploaded files match production build
+`efdebbf0-87a8-4f73-aa18-5283b7b6dd49`; source SHA256
+`893ba4f9afd1e2d3ac64caf126d8ed23b6c3e0fc79c0023402373adcef61c9ed`.
+Twelve rejected routing checks, authenticated runtime configuration, scoped reads
+and prior completed-session readability pass. This supersedes the previous
+not-deployed note for the fixes, but is not active hosted task acceptance.
+
+Fresh primary readback has 106 migrations with matching local checksums. The
+account hold is already released by the other workstream; this rollout did not
+change it. The browser dispatcher SQL/PostgREST tests were rerun on exact106:
+two passed, no skips, all disposable services cleaned. Do not restore the old
+hold or use the held-only admission helper against this released account.
+
+Current production `dpl_AWLr7t1nKF9scKqapuASyVkNsZ1o` is legacy/unbound, scheduler
+role `both`, with generic learning disabled. Its minute cron has recent HTTP200
+and terminal lifecycle receipts, but duplicate provider log records prevent strict
+complete-pass classification and caller provenance is unavailable. Generic task
+admission and execution are disabled there. The owned runtime-only preview cannot
+adopt unbound tasks, and must not be promoted unchanged: doing so would omit shared
+scheduler stages. A production rollout must preserve legacy owner and both-stage
+scheduling while enabling generic research and verifying the recovery origin.
+
+Concrete rollout and normal-public-route acceptance protocol are prepared in
+`.artifacts/scheduler-rollout/production-plan.json` and `acceptance-plan.md`.
+The next live acceptance creates one read-only webDiplomacy research task with six
+model calls, $1 reported-cost allowance and zero games, then disconnects and checks
+its original durable result. This is not a hard provider cost cap; timeout needs
+exact-task cancellation, because public task admission has a longer deadline.
+Production rollout remains a separate decision. No primary mutation, model/game
+work or native interaction occurred here. Full capability goal remains active.
+Evidence index: `.artifacts/scheduler-rollout/report.json`.
+
+
+## Notification and deferred-update recovery — locally qualified, 2026-10-12
+
+Desktop notification admission now stays retryable until immediately before the
+actual display attempt. Playback/quiet changes during admission, failed final
+attention reads, and failed prior-notification cleanup retain the original batch
+across restart. Interrupted actual display attempts remain non-retryable.
+
+The desktop updates route now returns 503 for operational claim/receipt failures,
+rather than incorrectly returning a pairing error and disabling notifications.
+Only malformed requests and known device/batch ownership failures return 400.
+Authenticated ownership, immutable batch destination lookup and bounded counts
+are preserved. The route-to-broker test proves same-batch recovery after restart.
+
+Between visits now acknowledges explicitly opened deferred findings and provides
+Mark read/Dismiss controls. The original record remains deferred until its normal
+release, then remains read and is excluded from notification admission. Actual
+component behavior and real HTTP/store/SQL tests cover GoTA and another league,
+including foreign-account/league rejection.
+
+Evidence: `.artifacts/companion-notice-recovery/server/report.json` (24 passing
+route/broker/inbox checks) and `.artifacts/deferred-update-acknowledgement/report.json`
+(one headless component test, two disposable database cases, typecheck passed).
+No production mutation, native app launch, model or game work occurred.
+
+Deployment prerequisite: the captured 106-migration primary ledger does **not**
+include `20261011151532_desktop_companion_notifications.sql`. Notification database
+qualification therefore used disposable106 plus that existing migration; it is
+not evidence that production can claim notices. Apply/verify that prerequisite
+as part of a separately approved rollout. These changes are local, not deployed.
+The previously requested production rollout/paid continuity trial remains pending.
+
+## Status from Claude Code, 2026-10-12 (persistence and session identity)
+
+- `agent/instructions.md`: new "Keep going until the goal is done" section;
+  Preston continues toward the opening goal, picks the recommended option
+  itself, and stops only for tool approvals, genuine forks, blockers or an
+  explicit pause. `agent/agent.ts` session timeout 14 → 90 days.
+- `agent/instructions/session-context.ts` (new dynamic instruction): per turn,
+  reads the conversation's `chat_sessions` record (title, opening goal, league,
+  host, short id) and tells Preston its session ID and shareable `/s/<id>` URL.
+  Preston previously answered "no tool gives it to me".
+- `components/workspace/request-workspace.tsx`: a copy-link row under the rail
+  header with the absolute conversation URL (opens in the web app) and a
+  Copy button.
+Test status after today's changes: full suite 2108 tests, 6 failing. Three were
+mine and are fixed in their tests (`tasks.test.mjs` default budget 200,
+`voice-history-browser.test.mjs` one mount probe,
+`container-policy-packaging.test.mjs` renamed project setting). Three are not
+from my changes and are left for Codex: `session-detail.test.mjs` (404 for the
+owner), `audit-runtime-route.test.mjs` (404 for the owner),
+`learning-lineage.test.mjs` ('unavailable' vs 'expired'),
+plus `hosted-readiness-deadline.test.mjs` (CLI process teardown).
+Follow-up (user, header polish): site nav is flush left with the brandmark
+first, then history carets; the conversation link row is a quiet inset line
+("Conversation <id> · Copy link · Open ↗") instead of a raw URL; the league
+workspace header (`components/league-explorer.tsx`) now shows the brandmark
+like the GoTA shell. Observation for Codex: the completed research task for
+the webDiplomacy conversation reported that the episode and league-results
+tools in the background researcher only work for GoTA, so non-GoTA research
+sessions cannot analyze rounds yet.
+
+## Status from Claude Code, 2026-10-12 (permissions mode, composer, approval failure)
+
+- Approval failure "tool_use ids were found without tool_result" (session
+  nzwuBekpUssC, approved `container_policy_build` never executed): your
+  `patches/eve-0.68.0.json` change (12:22 local) plus
+  `tests/eve-approval-history.test.mjs` covers it; 11 tests pass here. The
+  local `eve dev` process started 10:32 and predates the patch, so it needs a
+  restart; production picks it up on deploy (prebuild runs patch-eve).
+- New per-account permission mode (migration `20261012193000_permission_mode.sql`,
+  **applied to primary**, all accounts default `ask`): `students.permission_mode`
+  'ask'|'auto'; `lib/preferences*.ts`; the chat channel sends it as auth
+  attribute `permissionMode`; `agent/lib/permission-mode.ts` (`askOrAuto`,
+  `autoRequest`) replaces `always()` on build/upload/practice/enter_league/
+  research_authority and wraps the request policies of campaign_submission,
+  cloud_browser and cloud_desktop. Auto only applies when the current sender is
+  the signed-in owner who started the conversation; background/scheduled
+  senders still ask. Selector sits next to the model picker in both composers.
+  Note: in auto mode league entry also runs without a prompt; the instruction
+  that league submission needs an explicit human request is unchanged.
+- Follow-up composer: 3 rows, 72px minimum, 260px max, 14px text.
+- Unrelated failing test: `chat-tool-schemas.test.mjs` "sandbox tools reject
+  another game…" (expects GoTA adapter error, gets sign-in error) — from the
+  in-progress sandbox game-scope work.
+
+## Status from Claude Code, 2026-10-12 (continuing failed conversations)
+
+- Root cause of "The session is no longer active.": a failed turn cascades to
+  eve `session.failed`, which permanently retires the session id.
+- `components/workspace/request-workspace.tsx`: on `session.failed` (or an
+  inactive-session rejection) the next message continues the same conversation
+  in a fresh eve session. The request keeps its id; `continuedFrom` and a
+  bounded `priorTranscript` (lib/workspace/request.ts) are saved, the earlier
+  transcript stays visible above a "Continued in a new session" marker, and the
+  turn's clientContext carries `continuation` (opening goal, recent transcript)
+  so Preston resumes the work. The raw error is replaced by a Continue notice.
+- `lib/db.ts upsertChatSession`: a continuation archives the earlier session rows
+  of that link; the collision check now ignores archived rows. In the first live
+  test the link changed before this fix (nzwuBekpUssC → 0NO8OWigqs28); old links
+  now redirect via `continuedConversationLink` in lib/workspace/conversation-scope.ts.
+- Approval policies on dynamic tools must be inline arrow functions in the tool
+  file (eve compiles authored callbacks for durable replay); a closure returned
+  from a lib helper silently dropped build/upload/practice from the tool list.
+  Fixed by inlining `autoApproves(session)` in each tool.
+- Local dev: the Next and eve dev processes started 10:32 predate the eve patch;
+  eve dev was at 4 GB RSS and direct loads of /s/ links hung on the loading
+  screen. Needs a restart (not done; user's foreground process).
+- Removed 'Create evaluation case' (ConversationEvaluationExport) from the conversation rail at the user's request; the component and its API remain for later use.
+
+## Status from Claude Code, 2026-10-12 (Hermes mode)
+
+Hermes mode is live on production; details in docs/hermes-mode.md.
+
+- New files: `lib/hermes/host.ts`, `lib/hermes/turn.ts`,
+  `agent/lib/hermes-tools.ts`, `agent/channels/hermes.ts`,
+  `agent/tools/hermes_turn.ts`, `agent/instructions/hermes-mode.ts`,
+  `components/use-agent-mode.ts`, `scripts/hermes-host-probe.mjs`.
+- Shared files touched: `agent/channels/eve.ts` (adds the `agentMode` auth
+  attribute from clientContext), `lib/workspace/request.ts` (`agentMode`),
+  `lib/eve-channel-routing.ts` (`/hermes/mcp`), `components/workspace-composer.tsx`
+  and `components/workspace/request-workspace.tsx` (mode selector),
+  `components/use-workspace-requests.ts`.
+- Migrations applied to primary: `20261012210000_hermes_mode.sql`,
+  `20261012213000_hermes_pending_approvals.sql`.
+- `agent/lib/hermes-tools.ts` imports most tools in `agent/tools/`. A new or
+  renamed tool needs adding there for Hermes to see it.
+- Production env now sets CONTAINER_POLICY_PIPELINE_ENABLED,
+  CONTAINER_POLICY_PRACTICE_ENABLED and POLICY_ARTIFACT_BUCKET (production and
+  preview), copied from .env.local. Before this, hosted container builds were
+  off in production.
+- Production builds that reuse the build cache fail in `scripts/patch-eve.mjs`
+  ("Unrecognized Eve source: dist/src/harness/tool-loop.js"). `vercel promote`
+  of a preview rebuilds with the cache and fails the same way; deploy with
+  `vercel deploy --prod --force`.
+- Added `@vercel/oidc` 3.2.0 as a direct dependency (package.json only; it was
+  already in the lockfile). Hermes reads the AI Gateway token per request with
+  `getVercelOidcToken()`. `lib/terminal/gateway-credits.ts` and
+  `agent/tools/research_terminal.ts` still read `VERCEL_OIDC_TOKEN` from the
+  environment, which is empty in production functions; they likely fail there
+  the same way Hermes did.
+- Production has no PRESTON_EXTREME_RUNTIME_OWNER (local .env.local has one).
+  A new conversation with Auto plus Extreme logs "Extreme autoresearch requires
+  a configured durable runtime owner." and its first turn is cancelled. Not
+  changed by Claude Code: the value is tied to a specific eve world.
+- Pages pause the workspace when the tab is hidden (React Activity), so a
+  background automation tab never sends the first message. Not a bug; note for
+  browser tests.

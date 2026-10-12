@@ -1,3 +1,4 @@
+import {findingReferenceSchema} from '../companion/finding-discussion';
 import {defaultLeagueId} from '../league-catalog';
 import {z} from 'zod';
 import {viewSchema} from './presentation';
@@ -9,7 +10,14 @@ export const workspaceRequestSchema=z.object({
   id:z.string().min(1).max(128),shortId:z.string().regex(/^[A-Za-z0-9_-]{12}$/).optional(),prompt:z.string().min(1).max(50000),
   mode:z.enum(['auto','learn','do','view','research']),policyId:z.string(),
   sessionId:z.string().min(4).max(128).optional(),token:z.string(),
+  /** Earlier eve sessions of this same conversation, oldest first. A failed or
+   * retired session is continued in a fresh one; the link and transcript stay. */
+  /** Which agent does the work in this conversation. */
+  agentMode:z.enum(['preston','hermes']).optional(),
+  continuedFrom:z.array(z.string().min(4).max(128)).max(20).optional(),
+  priorTranscript:z.array(z.object({role:z.enum(['user','assistant']),text:z.string().max(6000)})).max(200).optional(),
   terminalGrantId:z.uuid().optional(),
+  findingReference:findingReferenceSchema.optional(),
   template:z.object({id:z.string().max(80),version:z.number().int().positive()}).optional(),
   appValues:appValuesSchema.optional(),
   closedTabs:z.array(z.string().max(5000)).optional(),

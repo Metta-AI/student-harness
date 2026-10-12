@@ -40,8 +40,8 @@ cron invocations automatically.
 | `POLICY_ARTIFACT_BUCKET` | existing private bucket | yes |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SESSION_SECRET` | production values; the sealing key must be the existing one | yes, sensitive |
 | `CRON_SECRET` | random 64 hex | yes, sensitive |
-| `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` | `team_A0VDEQRuESCZXJg6oNKCradT`, `prj_SNS0px93Qf5FmIY8tZds4IKcZuQu` (the student-harness project that owns builder sandboxes) | yes |
-| `VERCEL_TOKEN` | **missing**: a scoped Vercel access token for the Softmax team. Used by this function for the host sandbox and by the workers for builder sandboxes, so builders stay in the student-harness project where in-flight journals expect them. | no |
+| `VERCEL_TEAM_ID`, `CONTAINER_POLICY_VERCEL_PROJECT_ID` | `team_A0VDEQRuESCZXJg6oNKCradT`, `prj_SNS0px93Qf5FmIY8tZds4IKcZuQu` (the student-harness project that owns builder sandboxes). The project ID uses a custom name because Vercel injects its own `VERCEL_PROJECT_ID` into every function; the host forwards it to the sandbox as `VERCEL_PROJECT_ID`. | yes |
+| `VERCEL_TOKEN` | A Vercel access token scoped to the Softmax team and the `student-harness` project (created in the dashboard; the API refuses to mint tokens from the CLI session). Used by this function for the host sandbox and by the workers for builder sandboxes, so builders stay in the student-harness project where in-flight journals expect them. | yes, sensitive |
 
 `CONTAINER_POLICY_HOST_USE_OIDC` and `CONTAINER_POLICY_HOST_NAME` exist only
 for the bounded fixture and must never be set in production.

@@ -18,17 +18,21 @@ const CHECKOUT='/vercel/student-harness';
 const LEASE_MINUTES=Math.min(720,Math.max(10,Number(process.env.CONTAINER_POLICY_HOST_LEASE_MINUTES)||720));
 const LEASE_MS=LEASE_MINUTES*60*1000;
 const SERVICE_MINUTES=Math.max(1,LEASE_MINUTES-20);
-const WORKER_KEYS=['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','SESSION_SECRET','POLICY_ARTIFACT_BUCKET','VERCEL_TOKEN','VERCEL_TEAM_ID','VERCEL_PROJECT_ID'] as const;
+const WORKER_KEYS=['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','SESSION_SECRET','POLICY_ARTIFACT_BUCKET','VERCEL_TOKEN','VERCEL_TEAM_ID'] as const;
 type Env=Record<string,string|undefined>;
 
 function clean(value:string|undefined){return typeof value==='string'&&value&&value===value.trim()&&!/[\r\n]/.test(value)?value:null;}
 /** Same semantics as lib/container-policy/provider-credentials.ts: an unset
  * token means the SDK's own OIDC; a partial configuration fails closed. */
+/** Vercel injects its own VERCEL_PROJECT_ID (this host project) into every
+ * function, so the builder project is configured under a name the platform
+ * cannot shadow and forwarded to the sandbox as VERCEL_PROJECT_ID. */
+export function builderProjectId(env:Env=process.env){return clean(env.CONTAINER_POLICY_VERCEL_PROJECT_ID);}
 export function credentials(env:Env=process.env){
  // Fixture-only: lets a bounded live check hand FAKE worker tokens to the sandbox
  // while the SDK itself keeps its OIDC identity. Never set in production.
  if(env.CONTAINER_POLICY_HOST_USE_OIDC==='1'||env.VERCEL_TOKEN===undefined)return {};
- const token=clean(env.VERCEL_TOKEN),teamId=clean(env.VERCEL_TEAM_ID),projectId=clean(env.VERCEL_PROJECT_ID);
+ const token=clean(env.VERCEL_TOKEN),teamId=clean(env.VERCEL_TEAM_ID),projectId=builderProjectId(env);
  if(!token||!teamId||!projectId)throw Error('Incomplete Vercel credentials');
  return {token,teamId,projectId};
 }
@@ -44,6 +48,7 @@ export function workerEnvironment(env:Env=process.env){
  const out:Record<string,string>={NODE_ENV:'production',CI:'true',CONTAINER_POLICY_PIPELINE_ENABLED:'0',CONTAINER_POLICY_PRACTICE_ENABLED:'0',
   CONTAINER_POLICY_PRACTICE_WORKER_ENABLED:env.CONTAINER_POLICY_PRACTICE_WORKER_ENABLED==='0'?'0':'1'};
  for(const key of WORKER_KEYS){const value=clean(env[key]);if(!value)throw Error(`Missing worker environment: ${key}`);out[key]=value;}
+ const projectId=builderProjectId(env);if(!projectId)throw Error('Missing worker environment: CONTAINER_POLICY_VERCEL_PROJECT_ID');out.VERCEL_PROJECT_ID=projectId;
  if(!/^([0-9a-f]{2}){32}$/i.test(out.SESSION_SECRET))throw Error('SESSION_SECRET must be the existing 64-hex sealing key');
  return out;
 }
@@ -57,7 +62,7 @@ export async function current(env:Env=process.env,signal?:AbortSignal){
 }
 function describe(sandbox:Sandbox|null){
  if(!sandbox)return null;
- return {name:sandbox.name,sessionId:sandbox.sandboxId,status:sandbox.status,timeoutMs:sandbox.timeout??null,statusUpdatedAt:sandbox.statusUpdatedAt?.toISOString()??null};
+ return {name:sandbox.name,sessionId:sandbox.currentSession().sessionId,status:sandbox.status,timeoutMs:sandbox.timeout??null,statusUpdatedAt:sandbox.statusUpdatedAt?.toISOString()??null};
 }
 /** Provisioning runs detached inside the sandbox so the function returns in
  * seconds. The supervisor's own JSON lines are the only output retained. */
@@ -120,6 +125,22 @@ export async function stop(env:Env=process.env,signal?:AbortSignal){
  return {action:'stopped',drained,sandbox:describe(sandbox)};
 }
 
+/** Diagnostic: which Vercel identity and teams the configured token can see.
+ * Returns names and IDs only; never the token. */
+export async function whoami(env:Env=process.env,signal?:AbortSignal){
+ const token=clean(env.VERCEL_TOKEN);if(!token)return {token:'absent'};
+ const headers={authorization:`Bearer ${token}`};
+ const user=await fetch('https://api.vercel.com/v2/user',{headers,signal:bounded(10000,signal)});
+ const userBody:any=user.ok?await user.json():null;
+ const teams=await fetch('https://api.vercel.com/v2/teams?limit=20',{headers,signal:bounded(10000,signal)});
+ const teamsBody:any=teams.ok?await teams.json():null;
+ const projects=await fetch(`https://api.vercel.com/v9/projects?teamId=${encodeURIComponent(clean(env.VERCEL_TEAM_ID)??'')}&limit=20`,{headers,signal:bounded(10000,signal)});
+ const projectsBody:any=projects.ok?await projects.json():null;
+ return {token:'present',user:{status:user.status,username:userBody?.user?.username??null},
+  teams:{status:teams.status,list:(teamsBody?.teams??[]).map((t:any)=>({id:t.id,slug:t.slug}))},
+  projectsInConfiguredTeam:{status:projects.status,list:(projectsBody?.projects??[]).map((p:any)=>({id:p.id,name:p.name}))},
+  configured:{teamId:clean(env.VERCEL_TEAM_ID),builderProjectId:builderProjectId(env),platformProjectId:clean(env.VERCEL_PROJECT_ID)}};
+}
 function authorized(request:Request,env:Env=process.env){
  const secret=clean(env.CRON_SECRET),header=request.headers.get('authorization')??'';
  if(!secret||secret.length<32)return false;
@@ -134,6 +155,7 @@ export async function GET(request:Request){
  try{
   if(action==='ensure')return json(await ensure());
   if(action==='status')return json(await status());
+  if(action==='whoami')return json(await whoami());
   return json({error:'unknown action'},400);
  }catch(error){
   console.error(JSON.stringify({event:'policy_worker_host_failed',action,message:error instanceof Error?error.message.slice(0,200):'failed'}));

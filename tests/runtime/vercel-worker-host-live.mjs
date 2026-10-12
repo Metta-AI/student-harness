@@ -19,7 +19,7 @@ const env={...process.env,CONTAINER_POLICY_HOST_NAME:name,CONTAINER_POLICY_HOST_
  // Fake worker credentials: storage validation passes, every network pass fails fast,
  // and the fake Vercel token means the supervisor can never create a real builder.
  SUPABASE_URL:'https://fixture.invalid',SUPABASE_SERVICE_ROLE_KEY:'fixture-service-role',SESSION_SECRET:'ab'.repeat(32),POLICY_ARTIFACT_BUCKET:'fixture-only',
- VERCEL_TOKEN:'fixture-token',VERCEL_TEAM_ID:'fixture-team',VERCEL_PROJECT_ID:'fixture-project',
+ VERCEL_TOKEN:'fixture-token',VERCEL_TEAM_ID:'fixture-team',CONTAINER_POLICY_VERCEL_PROJECT_ID:'fixture-project',
  // The SDK itself keeps the local OIDC identity (fixture-only switch).
  CONTAINER_POLICY_HOST_USE_OIDC:'1'};
 Object.assign(process.env,{CONTAINER_POLICY_HOST_NAME:name,CONTAINER_POLICY_HOST_LEASE_MINUTES:'15'});

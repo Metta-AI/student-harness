@@ -1,0 +1,8 @@
+export type OutcomeRecord={games:number;wins:number;losses:number;time_limits:number;window_hours:number;complete:boolean};
+export function outcomeFocus(record:OutcomeRecord|null|undefined){
+  if(!record||!Number.isFinite(record.window_hours)||record.window_hours<=0||typeof record.complete!=="boolean"||!Number.isInteger(record.games)||record.games<=0||[record.wins,record.losses,record.time_limits].some(n=>!Number.isInteger(n)||n<0)||record.wins+record.losses+record.time_limits!==record.games)return null;
+  const stalled=record.time_limits>record.losses&&record.time_limits>record.wins;
+  return {stalled,title:stalled?'Find out why games aren’t finishing.':record.losses>0?'Find the decisions that cost us games.':'Find what makes the wins repeatable.',
+    detail:stalled?`${record.time_limits} of ${record.games} games reached the time limit. Start with a replay to see where progress stopped.`:record.losses>0?`${record.losses} losses in ${record.games} games. Compare a loss with a win before choosing a change.`:`${record.wins} wins in this sample. Check which decisions carry across opponents.`,
+    prompt:stalled?'Find a time-limit replay for this exact policy. Open it here and identify a moment where objective progress stopped, with a timestamp. Separate what happened from your hypothesis about why.':record.losses>0?'Open a loss and a comparable win for this exact policy. Identify a decision that differs, with replay timestamps, and explain what we can test.':'Open a win for this exact policy. Identify decisions that helped, with replay timestamps, and check whether they generalize to other opponents.'};
+}

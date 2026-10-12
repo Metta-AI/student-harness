@@ -1,6 +1,5 @@
+import {requireBackgroundExecution} from '../research/execution-control';
 import { db, latestPolicyVersion, workspaceFile } from "../db";
-import { controlAuditSession } from '../campaigns/audit-vm';
-import { campaignForTask, controlCampaign } from '../campaigns/store';
 import { taskRow, taskInputSchema, type Task, type TaskEvent, type TaskInput, type TaskWorker } from "./model";
 
 export async function rpc<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -64,19 +63,11 @@ export async function createTask(studentId: string, input: TaskInput, sessionId?
   await rpc("task_enqueue", { p_task: data.id, p_key: `created:${data.id}`, p_kind: "task.created" });
   return data as Task;
 }
-export async function controlTask(studentId: string, id: string, action: string, note = "") {
-  const current=await taskById(id,studentId);
-  if(current?.context?.mode==='audit'){
-    await controlAuditSession(studentId,id,action,note);return taskById(id,studentId);
-  }
-  const campaign=await campaignForTask(id,studentId);
-  if(campaign){
-    if(action==='steer'){
-      await rpc('campaign_control',{p_id:campaign.id,p_student:studentId,p_action:'steer',p_note:note});
-    }else if(action==='pause'||action==='resume'||action==='cancel')await controlCampaign(studentId,campaign.id,action,note);
-    return taskById(id,studentId);
-  }
-  const task = action === "steer" ? await rpcTask("task_steer", {p_task:id,p_student:studentId,p_note:note}) : await rpcTask("task_control", { p_task: id, p_student: studentId, p_action: action, p_note: note });
+export async function controlTask(studentId: string, id: string, action: string, note = "", operation?:{requestKey:string;generation?:number}) {
+  if(action==='resume')await requireBackgroundExecution(studentId,id);
+  const result=await db().rpc('task_control_request',{p_task:id,p_student:studentId,p_action:action,p_note:note,p_key:operation?.requestKey??crypto.randomUUID(),p_generation:operation?.generation??null}).abortSignal(AbortSignal.timeout(12000));
+  if(result.error)throw new Error(result.error.message);
+  const task=taskRow(result.data);
   if (!task) throw new Error("Task not found");
   return task;
 }

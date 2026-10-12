@@ -1,3 +1,4 @@
+import {canRunBackground} from '../research/execution-control';
 import {extendFixtures,freshSeedFixtures} from './fixtures';
 import {observedSeed} from './exclusions';
 import {fixtureHistory} from './fixture-history';
@@ -17,7 +18,7 @@ import { promoteStudy,reconcileStoppedDeployments } from './promotion';
 
 async function child(c:Campaign,role:string,objective:string,extra:Record<string,string>={}){
  return createTask(c.student_id,{kind:'research',objective,acceptanceCriteria:role==='candidate'?'Return compatible source components grounded in recorded evidence, including failure cases.':'Save observed behavior, hypotheses, counterexamples and concrete candidate ideas with exact evidence references.',
-  context:{mode:role==='candidate'?'candidate':'model',campaignId:c.id,role,leagueId:c.league_id,baselineHash:c.checkpoint.baselines?.[0]?.sourceHash,releaseFingerprint:c.checkpoint.release?.fingerprint,title:role==='candidate'?`Build candidate · cycle ${c.cycle+1}`:objective.slice(0,100),...extra},
+  context:{mode:role==='candidate'?'candidate':'model',campaignId:c.id,campaignLease:c.lease_token!,role,leagueId:c.league_id,baselineHash:c.checkpoint.baselines?.[0]?.sourceHash,releaseFingerprint:c.checkpoint.release?.fingerprint,title:role==='candidate'?`Build candidate · cycle ${c.cycle+1}`:objective.slice(0,100),...extra},
   requestKey:`campaign:${c.id}:${c.cycle}:${role}:${extra.policyId??'all'}${extra.attempt?`:repair:${extra.attempt}`:''}`,maxModelCalls:100});
 }
 async function finishCycle(c:Campaign,message:string,details:unknown,delay:number){
@@ -155,7 +156,10 @@ export async function processCampaign(id:string){
     return saveCampaign(c,{checkpoint:{...cp,fixtures:next,fixtureCursor:cursor+batch.length,message:`Frozen ${next.length}/${total} matched configurations`}},1);
    }
    if(!cp.candidate.versionId){
+    const live=checked(await db().from('research_campaigns').select('state,lease_token,lease_until').eq('id',c.id).eq('student_id',c.student_id).single());
+    if(live?.state!=='active'||live.lease_token!==c.lease_token||!live.lease_until||Date.parse(live.lease_until)<=Date.now())throw Error('Campaign execution is no longer active');
     const uploaded=await uploadPolicy(token,c.student_id,cp.candidate.source,cp.candidate.summary,`preston-${c.id.slice(0,8)}-${c.cycle}`,cp.baselines[0].playerId);
+    await artifact(c.student_id,c.league_id,'policy-upload','Private candidate upload receipt',{cycle:c.cycle,sourceHash:cp.candidate.sourceHash,versionId:uploaded.id},{campaignId:c.id,taskId:c.task_id});
     return saveCampaign(c,{checkpoint:{...cp,candidate:{...cp.candidate,versionId:uploaded.id},message:'Candidate uploaded for private evaluation'}});
    }
    const studies=(['screen','confirmation'] as const).map(cohort=>{
@@ -180,9 +184,18 @@ export async function processCampaign(id:string){
    }
    return saveCampaign(c,{phase:'promote',checkpoint:{...cp,confirmedStudyId:s.id,message:'Confirmation passed; verifying deployment conditions'}});
   }
-  if(c.phase==='promote'){
+  if(c.phase==='promote'||c.phase==='awaiting_submission'){
    const s=checked(await db().from('research_studies').select('*').eq('id',cp.confirmedStudyId).eq('student_id',c.student_id).single()) as Study;
    const result=await promoteStudy(c,s,token);
+   if(result.status==='approval_required'){
+    if(c.phase!=='awaiting_submission'){
+     await artifact(c.student_id,c.league_id,'submission-review',`Cycle ${c.cycle+1}: confirmed candidate ready for review`,
+      {studyId:s.id,candidateHash:s.protocol.candidate.sourceHash,summary:s.protocol.candidate.summary,result:s.result,leagueId:c.league_id,
+       note:'This is evidence for review, not league submission authority.'},{campaignId:c.id,taskId:c.task_id});
+     await recordEvent(c,`submission-review:${s.id}`,'submission.review_required',{studyId:s.id,candidateHash:s.protocol.candidate.sourceHash});
+    }
+    return saveCampaign(c,{phase:'awaiting_submission',checkpoint:{...cp,message:'Candidate confirmed. League entry requires an explicit request and review of this exact candidate.'}},60);
+   }
    if(result.status==='verifying')return saveCampaign(c,{checkpoint:{...cp,message:'Waiting for active champion readback'}},30);
    return finishCycle(c,result.status==='verified'?'Tested policy deployed and verified':'Candidate confirmed; automatic promotion is disabled',{studyId:s.id,result:s.result,deployment:result},c.protocol.observeMinutes*60);
   }
@@ -205,9 +218,9 @@ export async function processCampaign(id:string){
 
 export async function dispatchCampaigns(){
  const now=new Date().toISOString();
- const [campaigns,studies]=await Promise.all([db().from('research_campaigns').select('id').in('state',['active','paused','canceled']).lte('next_at',now).order('next_at').limit(4),db().from('research_studies').select('id').in('state',['running','auditing']).lte('next_at',now).order('next_at').limit(4)]);
+ const [campaigns,studies]=await Promise.all([db().from('research_campaigns').select('id,student_id').in('state',['active','paused','canceled']).lte('next_at',now).order('next_at').limit(4),db().from('research_studies').select('id,student_id').in('state',['running','auditing']).lte('next_at',now).order('next_at').limit(4)]);
  if(campaigns.error?.code==='PGRST205'||campaigns.error?.code==='42P01')return;
- const work=[...checked(campaigns)!.map(c=>()=>processCampaign(c.id)),...checked(studies)!.map(s=>()=>processStudy(s.id))];
+ const work=[...checked(campaigns)!.map(c=>async()=>{if(await canRunBackground(c.student_id))await processCampaign(c.id);}),...checked(studies)!.map(s=>async()=>{if(await canRunBackground(s.student_id))await processStudy(s.id);})];
  const results=await Promise.allSettled(work.map(run=>run()));
  results.forEach(r=>{if(r.status==='rejected')console.error('Campaign dispatch failed',r.reason instanceof Error?r.reason.message:String(r.reason));});
 }

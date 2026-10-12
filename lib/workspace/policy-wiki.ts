@@ -13,6 +13,7 @@ export function policyWikiEntries(revision:PolicyRevision):WikiEntry[]{
  for(const [id,goal] of Object.entries(ir.goal))add('goal',id,goal.claim,goal);
  for(const [id,skill] of Object.entries(ir.skill))add('skill',id,skill.intent,skill);
  for(const rule of ir.strategy)add('strategy',rule.id,rule.intent,rule,[{key:`situation:${rule.when}`,label:rule.when},{key:`skill:${rule.skill}`,label:rule.skill},...rule.for.map(id=>({key:`goal:${id}`,label:id}))],rule.id);
+ for(const routine of ir.source_model?.routines??[])add('strategy',routine.id,routine.description,{basis:'source-derived',...routine});
  add('execution',ir.execution.binding,ir.execution.language,ir.execution);
  add('update',`r${ir.update.revision}`,ir.update.change,ir.update);
  return entries;

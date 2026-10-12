@@ -1,0 +1,82 @@
+{{- if .Values.enabled }}
+{{- if not (has (int .Values.replicas) (list 0 1)) }}
+{{- fail "container worker replicas must be 0 or 1; SQL quotas require review before scaling" }}
+{{- end }}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" .Values.image.digest) }}
+{{- fail "a verified immutable worker image digest is required" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: student-harness-container-worker
+spec:
+  replicas: {{ .Values.replicas }}
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: student-harness-container-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: student-harness-container-worker
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      # Existing supervisor allows 120s for a child to drain before local SIGKILL.
+      terminationGracePeriodSeconds: 150
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ printf "%s@%s" .Values.image.repository .Values.image.digest | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["--duration-minutes=1440"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: CONTAINER_POLICY_PIPELINE_ENABLED
+              value: "0"
+            - name: CONTAINER_POLICY_PRACTICE_ENABLED
+              value: "0"
+            - name: CONTAINER_POLICY_PRACTICE_WORKER_ENABLED
+              value: {{ ternary "1" "0" .Values.practiceEnabled | quote }}
+            {{- range $key := list "SUPABASE_URL" "SUPABASE_SERVICE_ROLE_KEY" "SESSION_SECRET" "POLICY_ARTIFACT_BUCKET" "VERCEL_TOKEN" "VERCEL_TEAM_ID" "VERCEL_PROJECT_ID" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: {{ $key }}
+            {{- end }}
+          volumeMounts:
+            - name: temporary
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        # Durable source, archives, IDs and leases live in Supabase. This volume
+        # contains only verified temporary copies; it is never the work journal.
+        - name: temporary
+          emptyDir:
+            sizeLimit: 5Gi
+{{- end }}

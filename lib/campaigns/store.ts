@@ -67,29 +67,25 @@ export async function saveStudy(s:Study,patch:Record<string,unknown>,delaySecond
 }
 export async function campaignDetail(studentId:string,id:string){
  const campaign=await campaignById(id,studentId);if(!campaign)return null;
- const [studies,events,children,deployments,hostedUsage]=await Promise.all([
+ const [studies,events,children,deployments,hostedUsage,collections]=await Promise.all([
   db().from('research_studies').select('id,task_id,cycle,cohort,state,result,created_at').eq('campaign_id',id).order('created_at'),
   db().from('research_campaign_events').select('*').eq('campaign_id',id).order('id',{ascending:false}).limit(100),
   db().from('agent_tasks').select('id,objective,status,context,reason,model_calls,reported_cost_usd,retryAt:checkpoint->>provider_retry_at,progress:checkpoint->research_progress->>summary').eq('student_id',studentId).contains('context',{campaignId:id}).order('created_at'),
   db().from('research_deployments').select('*').eq('campaign_id',id),
   rpc('campaign_hosted_usage',{p_id:id,p_student:studentId}),
+  db().from('campaign_result_collections').select('attempt_id,status,terminal_status,observed_at,last_error,deadline_at,study:research_studies!inner(campaign_id)').eq('student_id',studentId).eq('study.campaign_id',id).order('created_at',{ascending:false}).limit(150),
  ]);
  const {baselines,candidate,fixtures,selection,...checkpoint}=campaign.checkpoint;
  const studyRows=checked(studies)??[];
  const attempts=studyRows.length?checked(await db().from('research_attempts').select('id,study_id,arm,attempt,state,xp_id,episode_id,error,updated_at,host_status:receipt->episode->>status').in('study_id',studyRows.map(s=>s.id)).order('created_at',{ascending:false}).limit(150)):[];
- return {campaign:{...campaign,checkpoint},attempts,hostedUsage,studies:studyRows,events:checked(events),sessions:checked(children),deployments:checked(deployments)};
+ return {campaign:{...campaign,checkpoint},attempts,hostedUsage,collections:checked(collections),studies:studyRows,events:checked(events),sessions:checked(children),deployments:checked(deployments)};
 }
-export async function controlCampaign(studentId:string,id:string,action:'pause'|'resume'|'cancel',note=''){
- const c=await campaignById(id,studentId);if(!c)throw Error('Campaign not found');
- if(c.state==='canceled'||c.state==='completed')throw Error('Campaign has ended');
- await rpc('campaign_control',{p_id:id,p_student:studentId,p_action:action,p_note:note});
- if(action!=='resume'){
-  const children=checked(await db().from('agent_tasks').select('id').eq('student_id',studentId).contains('context',{campaignId:id}).neq('context->>mode','study').neq('context->>mode','audit').in('status',['queued','running','waiting']));
-  for(const child of children??[])await rpc('task_control',{p_task:child.id,p_student:studentId,p_action:action,p_note:note});
- }else{
-  const children=checked(await db().from('agent_tasks').select('id').eq('student_id',studentId).contains('context',{campaignId:id}).neq('context->>mode','study').neq('context->>mode','audit').eq('status','paused'));
-  for(const child of children??[])await rpc('task_control',{p_task:child.id,p_student:studentId,p_action:'resume',p_note:note});
- }
- checked(await db().from('agent_tasks').update({status:action==='resume'?'waiting':action==='pause'?'paused':'canceled',next_check_at:'2100-01-01T00:00:00Z'}).eq('student_id',studentId).contains('context',{campaignId:id,mode:'study'}).not('status','in','(completed,failed,canceled)'));
- return campaignById(id,studentId);
+export async function controlCampaign(studentId:string,id:string,action:'pause'|'resume'|'cancel'|'steer',note='',operation?:{requestKey:string;generation?:number}){
+ return rpc<Campaign>('campaign_control_request',{p_id:id,p_student:studentId,p_action:action,p_note:note,
+  p_key:operation?.requestKey??crypto.randomUUID(),p_generation:operation?.generation??null});
+}
+
+export async function canceledStudyReceipt(studentId:string,campaignId:string,attemptId:string){
+ return checked(await db().from('campaign_result_collections').select('attempt_id,status,terminal_status,observed_at,receipt,last_error,deadline_at,study:research_studies!inner(campaign_id)')
+  .eq('student_id',studentId).eq('attempt_id',attemptId).eq('study.campaign_id',campaignId).maybeSingle());
 }

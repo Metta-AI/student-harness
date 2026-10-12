@@ -1,0 +1,5 @@
+import {z} from 'zod';
+
+const section=z.object({id:z.string(),name:z.string(),kind:z.enum(['routine','program','semantic']),summary:z.string(),condition:z.string().optional(),action:z.string().optional(),goals:z.array(z.string()),start:z.number().int(),end:z.number().int(),line:z.number().int(),lastLine:z.number().int(),guards:z.array(z.object({line:z.number().int(),text:z.string()})),calls:z.array(z.string()),basis:z.enum(['source','authored'])});
+export const policyExplanationSchema=z.object({policyId:z.string(),source:z.string(),hash:z.string(),origin:z.enum(['saved','hosted']),revision:z.number().nullable(),summary:z.string(),comments:z.array(z.string()),sections:z.array(section),beliefs:z.array(z.object({claim:z.string(),status:z.string(),evidence:z.array(z.string())})),unknowns:z.array(z.string()),coverage:z.object({mappedLines:z.number(),totalLines:z.number(),staleRules:z.number()}),representation:z.object({status:z.enum(['available','ready']),routines:z.number(),conditions:z.number(),assignments:z.number()}).optional(),checkedAt:z.string()});
+export type PolicyExplanation=z.infer<typeof policyExplanationSchema>;

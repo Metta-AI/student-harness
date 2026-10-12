@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { sealJson, unsealJson } from "./crypto";
+import {newSessionShortId,savedWorkspaceRequestSchema} from "./workspace/request";
 import { defaultReasoningEffort, isReasoningEffort, type ReasoningEffort } from "./reasoning";
 import type { PolicyRevision } from "./semantic-ir";
 import { withDatabaseReadTimeout } from "./database-fetch";
@@ -208,7 +209,7 @@ export async function experimentByXp(studentId: string, xpRequestId: string): Pr
 
 // ---------- chat sessions ----------
 
-const chatRow = z.object({ session_id: z.string(), student_id: z.string(), title: z.string().nullable(), host: z.string().nullable(), created_at: z.string(), updated_at: z.string(), archived_at: z.string().nullable() });
+const chatRow = z.object({ session_id: z.string(), student_id: z.string(), title: z.string().nullable(), host: z.string().nullable(), created_at: z.string(), updated_at: z.string(), archived_at: z.string().nullable(), workspace_request: savedWorkspaceRequestSchema.nullable().optional() });
 export type ChatSessionRow = z.infer<typeof chatRow>;
 
 export async function listChatSessions(studentId: string, host: string): Promise<ChatSessionRow[]> {
@@ -216,12 +217,40 @@ export async function listChatSessions(studentId: string, host: string): Promise
   return z.array(chatRow).parse(rows);
 }
 
-export async function upsertChatSession(input: { studentId: string; sessionId: string; title?: string; host: string; opponent?: {policyId: string; leagueId: string} }): Promise<ChatSessionRow> {
+export async function workspaceChatSession(studentId: string, sessionId: string, host: string, leagueId: string) {
+  const result=await db().from("chat_sessions").select("*").eq("student_id",studentId).eq("session_id",sessionId).eq("host",host).is("archived_at",null).maybeSingle();
+  if(result.error)throw new Error(`load workspace chat: ${result.error.message}`);
+  const chat=result.data?chatRow.parse(result.data):null;
+  return chat?.workspace_request?.leagueId===leagueId?chat:null;
+}
+
+export async function workspaceChatByShortId(studentId:string,shortId:string,host:string,leagueId:string){
+  const result=await db().from("chat_sessions").select("*").eq("student_id",studentId).eq("host",host).eq("workspace_request->>shortId",shortId).is("archived_at",null).maybeSingle();
+  if(result.error)throw new Error(`load workspace chat: ${result.error.message}`);
+  const chat=result.data?chatRow.parse(result.data):null;
+  return chat?.workspace_request?.leagueId===leagueId?chat:null;
+}
+
+export async function upsertChatSession(input: { studentId: string; sessionId: string; title?: string; host: string; workspaceRequest?: z.infer<typeof savedWorkspaceRequestSchema>; opponent?: {policyId: string; leagueId: string} }): Promise<ChatSessionRow> {
   const existing = await db().from("chat_sessions").select("*").eq("session_id", input.sessionId).maybeSingle();
   if (existing.error) throw new Error(`load chat: ${existing.error.message}`);
   if (existing.data && existing.data.student_id !== input.studentId) throw new Error("This chat belongs to another student");
+  if(existing.data?.workspace_request?.leagueId&&input.workspaceRequest&&existing.data.workspace_request.leagueId!==input.workspaceRequest.leagueId)throw new Error('A conversation cannot change leagues');
+  let workspaceRequest=input.workspaceRequest??existing.data?.workspace_request??null;
+  if(workspaceRequest){
+    let shortId=existing.data?.workspace_request?.shortId??workspaceRequest.shortId??newSessionShortId();
+    for(let attempt=0;!existing.data?.workspace_request?.shortId&&attempt<5;attempt++){
+      const collision=await db().from("chat_sessions").select("session_id").eq("workspace_request->>shortId",shortId).neq("session_id",input.sessionId).limit(1);
+      if(collision.error)throw new Error(`check conversation link: ${collision.error.message}`);
+      if(!collision.data?.length)break;
+      if(attempt===4)throw new Error("Could not allocate conversation link");
+      shortId=newSessionShortId();
+    }
+    workspaceRequest={...workspaceRequest,shortId};
+  }
   const row = must(await db().from("chat_sessions").upsert({
     session_id: input.sessionId, student_id: input.studentId, host: input.host,
+    workspace_request: workspaceRequest,
     opponent_policy_id: input.opponent?.policyId ?? existing.data?.opponent_policy_id ?? null,
     opponent_league_id: input.opponent?.leagueId ?? existing.data?.opponent_league_id ?? null,
     title: input.title ?? existing.data?.title ?? null, updated_at: new Date().toISOString(),

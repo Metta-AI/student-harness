@@ -2,18 +2,33 @@ import { db } from '../db';
 import { checked,recordEvent } from './store';
 import { apiJSON,champions,currentRelease,uploadPolicy } from './provider';
 import { sha,type Campaign,type Study,type Baseline } from './model';
+import {submissionApproval,admitSubmission} from './submission-authority';
+
+async function assertPromotionActive(c:Campaign){
+ const current=checked(await db().from('research_campaigns').select('state,lease_token,lease_until').eq('id',c.id).single());
+ if(current?.state!=='active'||current.lease_token!==c.lease_token||!current.lease_until||Date.parse(current.lease_until)<=Date.now())throw Error('Promotion stopped');
+}
 
 export async function promoteStudy(c:Campaign,s:Study,token:string){
  if(s.cohort!=='confirmation'||s.state!=='completed'||!s.result?.passed)throw Error('Independent confirmation gate has not passed');
  if(!c.protocol.promote)return {status:'not_requested'};
+ const approval=await submissionApproval(c,s);
+ if(!approval){
+  // Readback remains useful after expiry or a direction change; it grants no new effects.
+  await reconcileStoppedDeployments(c,token);
+  const settled=checked(await db().from('research_deployments').select('player_id,state,candidate_hash').eq('study_id',s.id).eq('student_id',c.student_id))??[];
+  const targets=c.checkpoint.baselines as Baseline[];
+  if(targets.length&&targets.every(b=>settled.some(d=>d.player_id===b.playerId&&d.state==='verified'&&d.candidate_hash===s.protocol.candidate.sourceHash)))return {status:'verified'};
+  if(settled.some(d=>['submitted','verifying'].includes(d.state)))return {status:'verifying'};
+  return {status:'approval_required'};
+ }
  const source=s.protocol.candidate.source;
  if(sha(source)!==s.protocol.candidate.sourceHash)throw Error('Tested candidate hash mismatch');
  if((await currentRelease(token,c.league_id)).fingerprint!==s.protocol.release.fingerprint)throw Error('Release changed before promotion');
  const baselines=c.checkpoint.baselines as Baseline[];
  let allVerified=true;
  for(const baseline of baselines){
-  const current=checked(await db().from('research_campaigns').select('state,lease_token,lease_until').eq('id',c.id).single());
-  if(current?.state!=='active'||current.lease_token!==c.lease_token||Date.parse(current.lease_until)<=Date.now())throw Error('Promotion stopped');
+  await assertPromotionActive(c);
   const existing=checked(await db().from('research_deployments').select('*').eq('study_id',s.id).eq('player_id',baseline.playerId).maybeSingle());
   let d=existing;
   if(!d){
@@ -33,6 +48,8 @@ export async function promoteStudy(c:Campaign,s:Study,token:string){
    throw Error('Another writer changed the champion; deployment has a conflict');
   }
   if(!d.candidate_version_id){
+   await assertPromotionActive(c);
+   if(!await submissionApproval(c,s))return {status:'approval_required'};
    const uploaded=await uploadPolicy(token,c.student_id,source,s.protocol.candidate.summary,`preston-${c.id.slice(0,8)}-${c.cycle}`,baseline.playerId);
    const meta=await apiJSON(token,`/stats/policy-versions/${uploaded.id}`);
    if(meta.player_file_content_hash&&meta.player_file_content_hash!==d.candidate_hash)throw Error('Uploaded policy differs from tested source');
@@ -50,9 +67,11 @@ export async function promoteStudy(c:Campaign,s:Study,token:string){
   const entries=Array.isArray(previous)?previous:previous.entries;
   let submission=entries.find((e:any)=>e.policy_version?.id===candidateId&&e.player?.id===baseline.playerId);
   if(!submission&&!d.receipt.submission){
-   const liveCampaign=checked(await db().from('research_campaigns').select('state,lease_token').eq('id',c.id).single());
-   if(liveCampaign?.state!=='active'||liveCampaign.lease_token!==c.lease_token)throw Error('Promotion stopped');
-   checked(await db().from('research_deployments').update({state:'submitted'}).eq('id',d.id));
+   if(['submitted','verifying'].includes(d.state))return {status:'verifying'};
+   await assertPromotionActive(c);
+   if(!await admitSubmission(c,s,baseline.playerId,approval))return {status:'approval_required'};
+   // Preserve the durable admission receipt in later writes.
+   d=checked(await db().from('research_deployments').select('*').eq('id',d.id).single());
    submission=await apiJSON(token,'/v2/league-submissions',{league_id:c.league_id,player_id:baseline.playerId,policy_version_id:candidateId,auto_champion:'always',notes:`Preston study ${s.id}: ${s.result.baselineWins} → ${s.result.candidateWins} wins; utility interval ${s.result.interval.join(', ')}. Exact audited source.`});
   }
   if(submission&&['failed','rejected','canceled','cancelled'].includes(submission.status)){

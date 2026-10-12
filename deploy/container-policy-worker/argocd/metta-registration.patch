@@ -1,0 +1,34 @@
+--- a/devops/app-manifests/values.yaml
++++ b/devops/app-manifests/values.yaml
+@@ -669,6 +669,31 @@
+         enabled: true
+         env: production
+ 
++  # Softmax Student Harness (ide.softmax.com) SQL-journal policy workers.
++  # Chart lives in the public Metta-AI/student-harness repository; pin an exact
++  # commit so only a reviewed PR here changes what runs. Activation sequence,
++  # secret shape and rollback: deploy/container-policy-worker/ACTIVATION.md
++  # in that repository. replicas stays 0 until the laptop supervisor is drained.
++  - name: student-harness-container-worker
++    namespace: student-harness
++    notify: true
++    source:
++      repoURL: https://github.com/Metta-AI/student-harness.git
++      path: deploy/container-policy-worker
++      targetRevision: REPLACE_WITH_EXACT_STUDENT_HARNESS_COMMIT_SHA
++      helm:
++        valuesObject:
++          enabled: true
++          replicas: 0
++          practiceEnabled: true
++          image:
++            repository: ghcr.io/metta-ai/student-harness-worker
++            digest: "REPLACE_WITH_QUALIFIED_IMAGE_DIGEST"
++          externalSecret:
++            enabled: true
++            storeName: aws-secretsmanager
++            remoteKey: vault/student-harness/container-worker/env
++
+   - name: softmax-com
+     notify: true
+     values:

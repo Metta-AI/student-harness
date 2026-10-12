@@ -1,12 +1,14 @@
+import {supportsGameView} from './game-capabilities';
 import { defaultLeagueId } from "../league-catalog";
 import { db, experimentByXp, latestPolicyVersion, policyVersionByRevision } from "../db";
 import { presentationInputSchema } from "./presentation";
-export async function preparePresentation(studentId: string, input: unknown) {
+export async function preparePresentation(studentId: string, input: unknown,leagueId=defaultLeagueId) {
   const parsed = presentationInputSchema.parse(input);
+  if(!supportsGameView(leagueId,parsed))throw Error('This view requires the GoTA policy adapter.');
   if(parsed.experimentId && !(await experimentByXp(studentId,parsed.experimentId))) throw new Error("Experiment unavailable in this workspace.");
   if(parsed.view==='custom') {
     if(!parsed.artifactId)throw new Error('Missing saved view');
-    const {data,error}=await db().from('preston_views').select('id').eq('student_id',studentId).eq('league_id',defaultLeagueId).eq('id',parsed.artifactId).maybeSingle();
+    const {data,error}=await db().from('preston_views').select('id').eq('student_id',studentId).eq('league_id',leagueId).eq('id',parsed.artifactId).maybeSingle();
     if(error||!data)throw new Error('View unavailable');
   }
   if (parsed.revision || parsed.branchId) {

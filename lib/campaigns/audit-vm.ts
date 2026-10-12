@@ -1,3 +1,4 @@
+import {requireBackgroundExecution,canRunBackground} from '../research/execution-control';
 import {randomBytes} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -7,53 +8,76 @@ import {sealJson,unsealJson} from '../crypto';
 import {rpc} from '../tasks/store';
 import {checked,artifact} from './store';
 import type {Release} from './model';
+import {checkAuditOperation,type AuditSession} from './audit-runtime';
 
 export type AuditScope={studentId:string;campaignId?:string;taskId?:string};
-type AuditSession={id:string;student_id:string;task_id:string;campaign_id:string|null;vm_name:string;sealed_key:string;state:string;release:Release};
 const opening=new Map<string,Promise<AuditEndpoint>>();
 export type AuditEndpoint={endpoint:string;key:string;session:AuditSession;ready:boolean};
 async function progress(a:AuditSession,state:string,message:string,log?:string){
- if(a.state===state&&!log){checked(await db().from('research_audit_sessions').update({last_used_at:new Date().toISOString()}).eq('id',a.id));return;}
- checked(await db().from('research_audit_sessions').update({state,last_used_at:new Date().toISOString()}).eq('id',a.id));
- checked(await db().from('agent_tasks').update({status:state==='setup_failed'?'paused':'waiting',reason:state==='setup_failed'?message:null,checkpoint:{audit_session_id:a.id,...(a.campaign_id?{campaign_id:a.campaign_id}:{}),research_progress:{summary:message},vm_name:a.vm_name},next_check_at:'2100-01-01T00:00:00Z',updated_at:new Date().toISOString(),...(log?{result:{summary:message,log}}:{})}).eq('id',a.task_id).not('status','in','(canceled,paused)'));
+ if(!await rpc('audit_runtime_progress',{p_id:a.id,p_token:a.runtime_token,p_epoch:a.control_epoch,p_state:state,p_message:message,p_log:log??null}))throw Error('Replay computer progress was superseded');
 }
 async function open(release:Release,scope:AuditScope):Promise<AuditEndpoint>{
- const session=await rpc<AuditSession>('audit_session_create',{p_student:scope.studentId,p_scope:scope.campaignId??scope.taskId??'replay-research',p_campaign:scope.campaignId??null,p_release:release,p_key:sealJson({key:randomBytes(32).toString('hex')})});
+ let session=await rpc<AuditSession>('audit_session_create',{p_student:scope.studentId,p_scope:scope.campaignId??scope.taskId??'replay-research',p_campaign:scope.campaignId??null,p_release:release,p_key:sealJson({key:randomBytes(32).toString('hex')})});
  const {key}=unsealJson(session.sealed_key) as {key:string};
  if(['paused','canceled'].includes(session.state))return {session,key,endpoint:'',ready:false};
- const sandbox=await Sandbox.getOrCreate({name:session.vm_name,persistent:true,resources:{vcpus:4},ports:[8097],timeout:30*60*1000,tags:{purpose:'preston-replay-auditor',session:session.id},signal:AbortSignal.timeout(20000)});
+ const admitted=await rpc<AuditSession|null>('audit_runtime_begin',{p_id:session.id,p_student:session.student_id,p_epoch:session.control_epoch,p_provision:true});
+ if(!admitted)return {session,key,endpoint:'',ready:false};
+ session=admitted;
+ const signal=AbortSignal.timeout(55000);
+ let provisioned=false,requested=false;
+ try{
+ await checkAuditOperation(session);
+ requested=true;
+ const sandbox=await Sandbox.getOrCreate({name:session.vm_name,resume:true,persistent:true,resources:{vcpus:4},ports:[8097],timeout:30*60*1000,tags:{purpose:'preston-replay-auditor',session:session.id},signal:AbortSignal.any([signal,AbortSignal.timeout(20000)])});
+ const computer=sandbox.currentSession();
+ session.runtime_session_id=computer.sessionId;
+ if(!await rpc('audit_runtime_provisioned',{p_id:session.id,p_token:session.runtime_token,p_session:session.runtime_session_id}))throw Error('Native provisioning receipt was superseded');
+ provisioned=true;
+ await checkAuditOperation(session);
+ if(session.retry_setup)await computer.runCommand('rm',['-f','/workspace/audit/bootstrap-status.json'],{signal,timeoutMs:5000});
+ // Bound Session methods cannot implicitly resume another physical computer.
  // getOrCreate reuses a running VM without renewing its deadline. Keep active
  // audits alive; persistent job inputs still recover after the provider's hard limit.
  if(sandbox.expiresAt&&sandbox.expiresAt.getTime()-Date.now()<10*60*1000){
-  try{await sandbox.extendTimeout(30*60*1000,{signal:AbortSignal.timeout(10000)});}
+  try{await checkAuditOperation(session);await computer.extendTimeout(30*60*1000,{signal:AbortSignal.any([signal,AbortSignal.timeout(10000)])});}
   catch{console.warn('Audit VM deadline could not be extended; persisted jobs will resume after restart',session.id);}
  }
  const files=['replay_audit.py','build_engines.py','bootstrap_vm.py','start_vm.py','native/replay.nim','native/subject_vm.nim','native/validate.nim'];
- await sandbox.writeFiles(await Promise.all(files.map(async file=>({path:`/workspace/audit/${file}`,content:await readFile(join(process.cwd(),'workers',file))}))));
- await sandbox.writeFiles([{path:'/workspace/audit/session.json',content:Buffer.from(JSON.stringify({release,key}))}]);
- const started=await sandbox.runCommand('python3',['/workspace/audit/start_vm.py']);
+ await checkAuditOperation(session);
+ await computer.writeFiles(await Promise.all(files.map(async file=>({path:`/workspace/audit/${file}`,content:await readFile(join(process.cwd(),'workers',file))}))),{signal});
+ await checkAuditOperation(session);
+ await computer.writeFiles([{path:'/workspace/audit/session.json',content:Buffer.from(JSON.stringify({release,key}))}],{signal});
+ await checkAuditOperation(session);
+ const started=await computer.runCommand('python3',['/workspace/audit/start_vm.py'],{signal,timeoutMs:15000});
  if(started.exitCode!==0)throw Error('Replay auditor process could not start');
- const bytes=await sandbox.readFileToBuffer({path:'/workspace/audit/bootstrap-status.json'});
+ const bytes=await computer.readFileToBuffer({path:'/workspace/audit/bootstrap-status.json'},{signal});
  let status=bytes?JSON.parse(bytes.toString()):null;
  if(status?.state==='ready'){
-  const registry=await sandbox.readFileToBuffer({path:'/workspace/audit/engines.json'});
+  const registry=await computer.readFileToBuffer({path:'/workspace/audit/engines.json'},{signal});
   if(!registry||!JSON.parse(registry.toString())[release.fingerprint]?.probeBinary)status={state:'building'};
  }
  if(status?.state!=='ready'){
   if(status?.state==='failed'){
-   const log=await sandbox.readFileToBuffer({path:'/workspace/audit/bootstrap.log'});
+   const log=await computer.readFileToBuffer({path:'/workspace/audit/bootstrap.log'},{signal});
    await progress(session,'setup_failed',status.message,log?.toString().slice(-10000));
   }else{
-   await sandbox.runCommand({cmd:'bash',args:['-lc','mkdir -p /workspace/audit && flock -n /workspace/audit/bootstrap.lock python3 /workspace/audit/bootstrap_vm.py >> /workspace/audit/bootstrap.log 2>&1'],detached:true});
+   await checkAuditOperation(session);
+   await computer.runCommand({cmd:'bash',args:['-lc','mkdir -p /workspace/audit && flock -n /workspace/audit/bootstrap.lock python3 /workspace/audit/bootstrap_vm.py >> /workspace/audit/bootstrap.log 2>&1'],detached:true,signal});
    await progress(session,'building','Preparing replay auditor on its dedicated VM');
   }
-  return {session,key,endpoint:sandbox.domain(8097),ready:false};
+  return {session,key,endpoint:computer.domain(8097),ready:false};
  }
  await progress(session,'ready','Replay auditor ready · dedicated VM');
- return {session,key,endpoint:sandbox.domain(8097),ready:true};
+ return {session,key,endpoint:computer.domain(8097),ready:true};
+ }catch(error){
+  if(!requested)await rpc('audit_runtime_not_started',{p_id:session.id,p_token:session.runtime_token});
+  if(requested&&!provisioned)await progress(session,'setup_failed','Replay computer provisioning is unconfirmed; shutdown must be reconciled before another start').catch(()=>{});
+  throw error;
+ }finally{await rpc('audit_runtime_release',{p_id:session.id,p_token:session.runtime_token});}
 }
 /** One durable named microVM per auditor session. Never executes native tools on the web host. */
-export function auditVM(release:Release,scope:AuditScope){
+export async function auditVM(release:Release,scope:AuditScope){
+ await requireBackgroundExecution(scope.studentId);
  const key=[scope.studentId,scope.campaignId??scope.taskId??'replay-research',release.fingerprint].join(':');
  let pending=opening.get(key);if(!pending){pending=open(release,scope).finally(()=>opening.delete(key));opening.set(key,pending);}return pending;
 }
@@ -78,37 +102,14 @@ export async function recordAuditJob(a:AuditSession,jobId:string,episodeId:strin
 /** Stop idle compute; the named sandbox filesystem persists and resumes on demand. */
 export async function stopIdleAuditVMs(){
  const rows=checked(await db().from('research_audit_sessions').select('*').eq('state','ready').lt('last_used_at',new Date(Date.now()-15*60*1000).toISOString()).limit(4))??[];
- for(const a of rows){
-  const pending=checked(await db().from('research_audit_jobs').select('job_id').eq('audit_session_id',a.id).in('state',['queued','running','waiting']).limit(1));if(pending?.length)continue;
-  const sandbox=await Sandbox.get({name:a.vm_name});await sandbox.stop();
-  checked(await db().from('research_audit_sessions').update({state:'idle'}).eq('id',a.id));
- }
+ for(const a of rows)await rpc('audit_idle_stop',{p_id:a.id});
 }
 
-export async function controlAuditSession(studentId:string,taskId:string,action:string,note:string){
- const a=checked(await db().from('research_audit_sessions').select('*').eq('student_id',studentId).eq('task_id',taskId).single());
- if(!a)throw Error('Audit session not found');
- if(action==='steer'){
-  checked(await db().from('agent_tasks').update({reason:note}).eq('id',taskId));return;
- }
- if(!['pause','resume','cancel'].includes(action))throw Error('Invalid audit control');
- // Save the control first: a failed VM connection must not leave the session runnable.
- checked(await db().from('research_audit_sessions').update({state:action==='resume'?'starting':action==='pause'?'paused':'canceled',last_used_at:new Date().toISOString()}).eq('id',a.id));
- checked(await db().from('agent_tasks').update({status:action==='resume'?'waiting':action==='pause'?'paused':'canceled',reason:note||null,next_check_at:'2100-01-01T00:00:00Z'}).eq('id',taskId));
- try{
-  const sandbox=await Sandbox.get({name:a.vm_name});
-  if(action==='resume'){
-   if(a.state==='setup_failed')await sandbox.runCommand('rm',['-f','/workspace/audit/bootstrap-status.json']);
-  }else await sandbox.stop();
- }catch(error){
-  // Provisioning may have failed before a VM existed. Resume provisions it in the dispatcher.
-  if(!(error instanceof Error&&'response' in error&&(error.response as Response)?.status===404))throw error;
- }
-}
 export async function dispatchAuditSessions(){
  const rows=checked(await db().from('research_audit_sessions').select('*').in('state',['starting','building','ready']).order('last_used_at').limit(4))??[];
  for(const a of rows){
   try{
+   if(!await canRunBackground(a.student_id))continue;
    const jobs=checked(await db().from('research_audit_jobs').select('*').eq('audit_session_id',a.id).in('state',['queued','running','waiting']))??[];
    if(a.state==='ready'&&!jobs.length)continue;
    const vm=await auditVM(a.release,{studentId:a.student_id,campaignId:a.campaign_id??undefined,taskId:a.scope_key});

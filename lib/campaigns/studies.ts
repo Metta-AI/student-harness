@@ -95,7 +95,7 @@ export async function processStudy(id:string){
     stage='Submit hosted game';
     const xp=await apiJSON(token,'/v2/experience-requests',a.request);
     if(typeof xp.id!=='string')throw Error('Hosted request receipt missing ID');
-    await write(s,a,{xp_id:xp.id,state:'requested',receipt:{created:xp}});return;
+    await rpc('campaign_attempt_receipt',{p_study:s.id,p_id:a.id,p_key:a.request_key,p_xp:xp.id,p_receipt:xp});return;
    }
    stage='Poll hosted request';
    const xp=await apiJSON(token,`/v2/experience-requests/${encodeURIComponent(a.xp_id)}`);
@@ -158,10 +158,10 @@ export async function processStudy(id:string){
   else if(!running&&!outstanding&&campaign.state==='canceled')state='canceled';
   else if(attempts.some(a=>a.state==='auditing'))state='auditing';
   const retryAt=transportCooldownUntil(attempts);
-  checked(await db().from('agent_tasks').update({status:state==='completed'?'completed':state==='invalid'?'failed':state==='canceled'?'canceled':campaign.state==='paused'?'paused':campaign.state==='canceled'?'canceled':'waiting',
+  await rpc('campaign_study_checkpoint',{p_study:s.id,p_token:s.lease_token,p_patch:{status:state==='completed'?'completed':state==='invalid'?'failed':state==='canceled'?'canceled':campaign.state==='paused'?'paused':campaign.state==='canceled'?'canceled':'waiting',
    result:result?{humanSummary:studyHumanSummary(result,s.cohort),summary:`${s.cohort}: wins ${result.baselineWins} → ${result.candidateWins}; ${result.interpretation}`,studyId:id,...result}:null,
    checkpoint:{campaign_id:campaign.id,study_id:id,research_progress:{summary:`${pairs.length}/${s.protocol.pairs} pairs · ${completed.length} audited games · ${attempts.length} attempts${retryAt&&running&&!invalid?` · Host transport cooldown until ${new Date(retryAt).toISOString()}`:''}`}},
-   reason:invalidReason??failures[0]?.error?.message??null,next_check_at:'2100-01-01T00:00:00Z',updated_at:new Date().toISOString()}).eq('id',s.task_id));
+   reason:invalidReason??failures[0]?.error?.message??null,next_check_at:'2100-01-01T00:00:00Z',updated_at:new Date().toISOString()}});
   await saveStudy(s,{state,...(result?{result}:invalidReason?{result:{invalidReason}}:{})},30);
  }catch(error){
   const message=String(error instanceof Error?error.message:error);

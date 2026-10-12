@@ -1,0 +1,53 @@
+name: Softmax IDE desktop release
+# Builds the macOS app for Apple Silicon and Intel and attaches both zips to a
+# GitHub release. Trigger by pushing a tag like desktop-v0.1.1, or manually.
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag (desktop-vX.Y.Z) to attach builds to
+        required: true
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci --no-audit --no-fund
+      - name: Unit tests
+        working-directory: desktop
+        run: node --test tests/*.test.cjs
+      - name: Package (arm64 + x64)
+        working-directory: desktop
+        run: npm run package
+      - name: Zip app bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./desktop/package.json').version")
+          mkdir -p release
+          for arch in arm64 x64; do
+            SRC="desktop/dist/Softmax IDE-darwin-$arch/Softmax IDE.app"
+            test -d "$SRC"
+            ditto -c -k --sequesterRsrc --keepParent "$SRC" "release/Softmax-IDE-$VERSION-mac-$arch.zip"
+          done
+          shasum -a 256 release/*.zip > release/SHA256SUMS.txt
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Softmax IDE $TAG" --notes "Unsigned macOS build. See desktop/README.md for install steps." --draft=false
+          gh release upload "$TAG" release/*.zip release/SHA256SUMS.txt --clobber

@@ -1880,3 +1880,15 @@ Hermes mode is live on production; details in docs/hermes-mode.md.
 - Pages pause the workspace when the tab is hidden (React Activity), so a
   background automation tab never sends the first message. Not a bug; note for
   browser tests.
+
+## 2026-10-13 Claude Code: Hermes credit metering
+
+- New: `lib/hermes/gateway-meter.ts`, `app/api/hermes/gateway/[...path]/route.ts`
+  (maxDuration 800). Hermes model calls are proxied and metered per call with
+  ledger keys `chat:hermes:<uuid>` (reserve $1, settle AI Gateway `usage.cost`).
+- Changed: `lib/hermes/host.ts` (Hermes base_url → proxy, ai-gateway removed from
+  the sandbox network policy, Hermes reasoning-host patch, expired proxy-cert
+  self-heal), `lib/hermes/turn.ts` (unique session titles).
+- Owner granted a one-day credit top-up to a $100 balance via
+  `user_credit_topup_to_balance` (key `owner-topup-2026-10-13-10k`).
+- Production deployed three times with `--prod --force`; tsc clean each time.

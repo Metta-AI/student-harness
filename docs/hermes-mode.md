@@ -2,6 +2,11 @@
 
 Proposal, 2026-10-12. Phases 1 and 2 are implemented and live; see Status.
 
+This page preserves the original proposal and its dated status updates. The
+proposal's one-sandbox-per-conversation design was superseded by the shared
+account sandbox described under Status. For a source-checked current overview,
+see [Preston, Eve, Hermes and the model](system-overview.md#preston-eve-hermes-and-the-model).
+
 ## Goal
 
 Let a conversation run on Hermes (NousResearch `hermes-agent`) instead of Eve's
@@ -169,9 +174,28 @@ Built and verified live against production:
   deployed but not yet re-run in the app, because the account hit its daily
   research budget.
 
+Credit metering (2026-10-13):
+
+- Hermes's model calls, auxiliary ones included, go to
+  `/api/hermes/gateway/v1/*` on the harness (`lib/hermes/gateway-meter.ts`),
+  not to AI Gateway. The sandbox network policy no longer allows
+  `ai-gateway.vercel.sh`, so no call can skip the meter.
+- Each POST reserves $1 (`chat:hermes:<uuid>`, shown as a chat model call in
+  Usage), forwards to AI Gateway with the server's Gateway credential, and
+  settles the gateway-priced `usage.cost` plus tokens. Rejected requests settle
+  at $0; a call whose usage never arrives keeps its hold. Out of credits → 402,
+  and Hermes stops.
+- Hermes sends reasoning settings only to hosts it recognizes as AI Gateway, so
+  `startGateway` patches that one check (`REASONING_PATCH`) before each start
+  and fails if the pinned source has moved.
+- Hermes session titles must be unique per host; titles carry a suffix.
+- The sandbox network proxy re-signs TLS for header-injected hosts with
+  one-day certificates and was seen serving an expired one (every MCP and model
+  call failed with "certificate has expired"). `ensureHermesHost` probes for
+  it and removes/re-adds the harness rule, which issues a fresh certificate.
+
 Not done yet:
 
-- Hermes Gateway usage is not imported into the credit ledger.
 - `SOUL.md` is Hermes's default, not derived from Preston's instructions.
 - Eve sandbox tools (bash, files, save_policy_version) are not exposed; Hermes
   uses its own shell in its own sandbox, so files are not shared with Preston's
@@ -193,6 +217,6 @@ Not done yet:
 ## Sources
 
 - Repository: `workers/autoresearch/`, `lib/terminal/`, `agent/tools/research_terminal.ts`,
-  `app/api/research/terminal/route.ts`, README "Autoresearch" section.
+  `app/api/research/terminal/route.ts`, [historical autoresearch notes](archive/implementation-notes-2026-10-13.md#terminal-autoresearch-workspace).
 - Hermes docs: <https://hermes-agent.nousresearch.com/docs> (API server, approvals,
   terminal backends, MCP), repository <https://github.com/NousResearch/hermes-agent>.

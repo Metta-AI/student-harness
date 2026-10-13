@@ -1,5 +1,4 @@
 import {Sandbox} from '@vercel/sandbox';
-import {getVercelOidcToken} from '@vercel/oidc';
 import {createHash,createHmac,randomBytes} from 'node:crypto';
 import {db} from '../db';
 import {sealJson,unsealJson} from '../crypto';
@@ -10,8 +9,8 @@ import {defaultChatModel,gatewayModelIds} from '../model-selection';
 /** Hermes mode runs one long-lived Hermes gateway per account in a persistent,
  * named Vercel Sandbox. Every Hermes conversation of that account shares it;
  * each conversation is its own Hermes session. Credentials never enter the VM:
- * AI Gateway, Softmax and the harness MCP server receive their Authorization
- * headers from the sandbox network policy. */
+ * Softmax and the harness (MCP server and metered model proxy) receive their
+ * Authorization headers from the sandbox network policy. */
 /** Bump the suffix to rebuild the base image without changing the upstream pin. */
 export const HERMES_VERSION='v0.21.7+2';
 const HERMES_COMMIT='71d34bad1045610252eda02ee79549436896e784';
@@ -41,23 +40,32 @@ export function verifyHermesMcpToken(token:string):string|null{
  return diff===0?student:null;
 }
 
+/** Hermes sends reasoning settings only to hosts it recognizes as AI Gateway.
+ * The metering proxy forwards to AI Gateway unchanged, so it is recognized too.
+ * Applied before every gateway start; fails loudly if the pinned source moved. */
+const REASONING_PATCH=`python3 - <<'PY'
+import pathlib
+p=pathlib.Path('${HOME}/hermes-agent/agent/reasoning_params.py')
+s=p.read_text()
+old='base_url_host_matches(url, "ai-gateway.vercel.sh"):'
+new='base_url_host_matches(url, "ai-gateway.vercel.sh") or "/api/hermes/gateway/" in url:'
+if new not in s:
+    if old not in s: raise SystemExit('Hermes reasoning gate not found; update REASONING_PATCH')
+    p.write_text(s.replace(old,new,1))
+PY`;
+
 const INSTALL=`set -euo pipefail
 curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/hermes-install.sh
 CI=1 bash /tmp/hermes-install.sh --commit ${HERMES_COMMIT} --non-interactive --skip-browser --skip-computer-use
 "$HOME/.local/bin/hermes" --version`;
 
-/** On Vercel the OIDC token arrives with each request, not in the environment;
- * the helper reads it from the request context and falls back to the env
- * locally. It expires, so it is re-read and re-applied on every turn. */
-async function gatewayCredential(){
- const value=process.env.AI_GATEWAY_API_KEY||await getVercelOidcToken().catch(()=>process.env.VERCEL_OIDC_TOKEN);
- if(!value)throw Error('Vercel AI Gateway credentials are required for Hermes mode.');
- return value;
-}
+/** Hermes's model calls go to the harness gateway proxy, which meters each one
+ * against the account's credits. AI Gateway itself is not reachable from the
+ * VM, so no call can skip the meter. */
+export function hermesGatewayUrl(){return `${hermesMcpOrigin()}/api/hermes/gateway/v1`;}
 async function networkPolicy(student:string){
  const mcp=new URL(hermesMcpOrigin()).hostname;
  return {allow:{
-  'ai-gateway.vercel.sh':[{transform:[{headers:{authorization:`Bearer ${await gatewayCredential()}`}}]}],
   'softmax.com':[{transform:[{headers:{authorization:`Bearer ${await studentToken(student)}`}}]}],
   'observatory-private.s3.amazonaws.com':[],
   [mcp]:[{transform:[{headers:{authorization:`Bearer ${hermesMcpToken(student)}`}}]}],
@@ -71,7 +79,7 @@ function configYaml(){
  return `model:
   provider: ai-gateway
   default: ${gatewayModelIds[defaultChatModel]}
-  base_url: https://ai-gateway.vercel.sh/v1
+  base_url: ${hermesGatewayUrl()}
 fallback_providers: []
 terminal:
   backend: local
@@ -136,12 +144,13 @@ async function startGateway(sandbox:Sandbox,key:string){
  await run(sandbox,`mkdir -p ${HOME} ${WORKSPACE}`);
  await sandbox.writeFiles([
   {path:`${HOME}/config.yaml`,content:Buffer.from(configYaml())},
-  {path:`${HOME}/.env`,content:Buffer.from(`API_SERVER_ENABLED=true\nAPI_SERVER_HOST=0.0.0.0\nAPI_SERVER_PORT=${PORT}\nAPI_SERVER_KEY=${key}\nAI_GATEWAY_API_KEY=placeholder-injected-at-network-boundary\nAI_GATEWAY_BASE_URL=https://ai-gateway.vercel.sh/v1\n`)},
+  {path:`${HOME}/.env`,content:Buffer.from(`API_SERVER_ENABLED=true\nAPI_SERVER_HOST=0.0.0.0\nAPI_SERVER_PORT=${PORT}\nAPI_SERVER_KEY=${key}\nAI_GATEWAY_API_KEY=placeholder-injected-at-network-boundary\nAI_GATEWAY_BASE_URL=${hermesGatewayUrl()}\n`)},
  ]);
  // The gateway's command line ends in "gateway run" after a long Python
  // launcher, and a second gateway exits while the first holds the lock, so stop
  // the old one and wait for it to exit before starting with the new config.
  const gateway='[h]ermes_cli.main import main.*gateway run';
+ await run(sandbox,REASONING_PATCH);
  await run(sandbox,`chmod 600 ${HOME}/.env; export PATH="$HOME/.local/bin:$PATH" HERMES_HOME=${HOME}
 timeout 20 hermes gateway stop >/dev/null 2>&1 || true
 pkill -f "${gateway}" || true
@@ -150,6 +159,21 @@ pkill -9 -f "${gateway}" || true; sleep 1
 rm -f ${HOME}/gateway.pid ${HOME}/gateway.lock ${HOME}/gateway.sock`,{timeoutMs:90000});
  await sandbox.runCommand({cmd:'bash',args:['-lc',`export PATH="$HOME/.local/bin:$PATH"; export HERMES_HOME=${HOME}; nohup hermes gateway run > ${HOME}/gateway.log 2>&1 &`],detached:true});
  await sandbox.writeFiles([{path:`${HOME}/.preston-gateway-config`,content:Buffer.from(configYaml())}]);
+}
+
+/** The sandbox network proxy re-signs TLS for hosts whose headers it injects,
+ * with a leaf certificate valid for one day, and has been seen to keep serving
+ * it after expiry. Then every MCP and model call fails with "certificate has
+ * expired". Removing and re-adding the host's rule makes it issue a new one. */
+async function renewHarnessCertificate(sandbox:Sandbox,student:string){
+ const host=new URL(hermesMcpOrigin()).hostname;
+ const probe=`curl -sS -o /dev/null -m 15 https://${host}/ 2>&1 | grep -q "certificate has expired" && echo expired || true`;
+ if(!(await run(sandbox,probe,{timeoutMs:30000}).catch(()=> '')).includes('expired'))return;
+ const policy=await networkPolicy(student);
+ const {[host]:_harness,...rest}=policy.allow;
+ await sandbox.updateNetworkPolicy({allow:rest} as never);
+ await sandbox.updateNetworkPolicy(policy as never);
+ if((await run(sandbox,probe,{timeoutMs:30000}).catch(()=> '')).includes('expired'))throw Error('The Hermes sandbox network proxy is serving an expired certificate for the harness.');
 }
 
 /** Returns a running shared Hermes gateway for this account, creating or
@@ -172,6 +196,7 @@ export async function ensureHermesHost(student:string):Promise<Host>{
   await sandbox.updateNetworkPolicy(await networkPolicy(student) as never);
   try{await sandbox.extendTimeout(LEASE_MS);}catch{}
  }
+ await renewHarnessCertificate(sandbox,student);
  const url=sandbox.domain(PORT).replace(/\/$/,'');
  // A changed config (new MCP origin, deny rules) needs a gateway restart.
  // The marker is written only when a gateway starts, so it names the config

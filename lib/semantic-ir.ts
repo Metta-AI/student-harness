@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { describePolicySource, policySourceModelSchema } from "./policy-source-model.ts";
 import { semanticChangeSchema, type SemanticChange } from "./semantic-change.ts";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -14,6 +15,7 @@ const ruleSchema = z.object({
 });
 export const semanticIrSchema = z.object({
   schema: z.literal("gota-harness-semantic-ir/1"), id: z.string().min(1),
+  source_model: policySourceModelSchema.optional(),
   situation: z.object({ authority: z.string(), predicates: z.record(z.string(), z.string()), unknowns: z.array(z.string()) }),
   belief: z.object({ claims: z.record(z.string(), z.object({ claim: z.string(), status: z.enum(["untested", "needs_review"]), evidence: z.array(z.string()) })) }),
   goal: z.record(z.string(), z.object({ claim: z.string(), provenance: z.enum(["authored", "interpretation"]) })),
@@ -45,6 +47,8 @@ function revision(source: string, ir: SemanticIR): PolicyRevision {
     }
   }
   if (ir.execution.source_sha256 !== digest(source)) throw new Error("Semantic IR does not match source bytes");
+  // Regenerate from the exact bytes on every creation/edit, including task candidates.
+  ir = { ...ir, source_model: describePolicySource(source) };
   return {
     source, ir,
     revisionId: digest(`${ir.update.parent ?? "root"}\n${digest(source)}\n${digest(canonicalJson(ir))}`),

@@ -7,7 +7,7 @@ const base='https://softmax.com/api/observatory';
 export class ProviderError extends Error {status:number;constructor(status:number,path:string){super(`Softmax ${status}: ${path}`);this.status=status;}}
 export async function apiBytes(token:string,path:string,body?:unknown){
  if(!path.startsWith('/')||path.startsWith('//'))throw Error('Invalid provider path');
- const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{Authorization:`Bearer ${token}`,...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000),cache:'no-store'});
+ const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{Authorization:`Bearer ${token}`,'User-Agent':'softmax-student-harness/research',...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000),cache:'no-store'});
  if(!r.ok)throw new ProviderError(r.status,path);
  const data=Buffer.from(await r.arrayBuffer());if(data.length>64*1024*1024)throw Error('Artifact exceeds 64 MiB');
  return data[0]===31&&data[1]===139?gunzipSync(data,{maxOutputLength:64*1024*1024}):data;
@@ -32,30 +32,56 @@ export async function champions(token:string,leagueId:string,playerIds:string[]=
   return {playerId:player.id,playerName:player.name,versionId:matches[0].policy_version.id,membership:matches[0]};
  });
 }
-export async function policySourceHash(token:string,versionId:string){
+async function sourceHashFromEpisodes(token:string,versionId:string,episodes:any[]) {
+ for(const episode of episodes){
+  if(episode.status!=='completed'||!Array.isArray(episode.policy_version_ids)||!episode.policy_version_ids.includes(versionId))continue;
+  let spec;
+  try{spec=await episodeArtifact(token,episode.id,'spec');}
+  catch(error){if(error instanceof ProviderError&&error.status===404)continue;throw error;}
+  return z.string().regex(/^[0-9a-f]{64}$/).parse(spec.players?.[episode.policy_version_ids.indexOf(versionId)]?.content_hash);
+ }
+ return null;
+}
+export async function policySourceHash(token:string,versionId:string,leagueId?:string){
  const meta=await apiJSON(token,`/stats/policy-versions/${versionId}`);
  if(meta.player_file_content_hash)return z.string().regex(/^[0-9a-f]{64}$/).parse(meta.player_file_content_hash);
  let cursor:string|undefined;const seen=new Set<string>();
  do{
-  const episodes=await apiJSON(token,`/v2/policy-versions/${encodeURIComponent(versionId)}/episode-requests?limit=100${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`);
-  for(const episode of episodes.entries??[]){
-   if(episode.status!=='completed'||!Array.isArray(episode.policy_version_ids)||!episode.policy_version_ids.includes(versionId))continue;
-   let spec;
-   try{spec=await episodeArtifact(token,episode.id,'spec');}
-   catch(error){if(error instanceof ProviderError&&error.status===404)continue;throw error;}
-   return z.string().regex(/^[0-9a-f]{64}$/).parse(spec.players?.[episode.policy_version_ids.indexOf(versionId)]?.content_hash);
+  let episodes;
+  try{episodes=await apiJSON(token,`/v2/policy-versions/${encodeURIComponent(versionId)}/episode-requests?limit=100${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`);}
+  catch(error){
+   // A policy-history outage need not hide a source recorded in a league round.
+   if(leagueId&&error instanceof ProviderError&&error.status>=500)break;
+   throw error;
   }
+  const hash=await sourceHashFromEpisodes(token,versionId,episodes.entries??[]);
+  if(hash)return hash;
   cursor=episodes.next_cursor??undefined;
   if(cursor){if(seen.has(cursor))throw Error('Champion episode pagination did not advance');seen.add(cursor);}
  }while(cursor);
+ if(leagueId){
+  const rounds=await apiJSON(token,`/v2/rounds?league_id=${encodeURIComponent(leagueId)}&limit=30`);
+  for(const round of rounds.entries){
+   let next:string|null=null;const seenPages=new Set<string>();
+   do{
+    const page=await apiJSON(token,`/v2/rounds/${encodeURIComponent(round.id)}/episode-requests?limit=100${next?`&cursor=${encodeURIComponent(next)}`:''}`);
+    const hash=await sourceHashFromEpisodes(token,versionId,page.entries??[]);
+    if(hash)return hash;
+    next=page.next_cursor??null;
+    if(next){if(seenPages.has(next))throw Error('Round episode pagination did not advance');seenPages.add(next);}
+   }while(next);
+  }
+ }
  throw Error('No source identity is available for this champion yet');
 }
 export async function sourceForHash(token:string,coworldId:string,sourceHash:string,studentId?:string){
  if(studentId){
   const {db}=await import('../db');
-  const saved=await db().from('research_artifacts').select('content').eq('student_id',studentId).in('kind',['policy-source','candidate','baseline']).eq('content->>sourceHash',sourceHash).limit(1);
+  const saved=await db().from('research_artifacts').select('content').eq('student_id',studentId).in('kind',['policy-source','candidate','baseline','uploaded-policy-source']).eq('content->>sourceHash',sourceHash).limit(1);
   const source=saved.data?.[0]?.content?.source;
   if(typeof source==='string'&&sha(source)===sourceHash)return source;
+  const files=await db().from('workspace_files').select('content').eq('student_id',studentId).eq('sha256',sourceHash).limit(1);
+  const exact=files.data?.[0]?.content;if(typeof exact==='string'&&sha(exact)===sourceHash)return exact;
   const local=await db().from('policy_versions').select('source').eq('student_id',studentId).order('created_at',{ascending:false}).limit(100);
   const match=local.data?.find(p=>sha(p.source)===sourceHash);if(match)return match.source as string;
  }
@@ -66,7 +92,7 @@ export async function resolveBaselines(token:string,leagueId:string,playerIds:st
  const release=await currentRelease(token,leagueId), members=await champions(token,leagueId,playerIds);
  const baselines:Baseline[]=[];
  for(const m of members){
-  const sourceHash=await policySourceHash(token,m.versionId);
+  const sourceHash=await policySourceHash(token,m.versionId,leagueId);
   const source=await sourceForHash(token,release.coworldId,sourceHash,studentId);
   if(Buffer.byteLength(source)>65536)throw Error('Current policy is not a supported BASIC source file');
   baselines.push({playerId:m.playerId,playerName:m.playerName,versionId:m.versionId,sourceHash,source});

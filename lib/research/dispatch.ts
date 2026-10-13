@@ -1,8 +1,11 @@
+import {canRunBackground} from './execution-control';
 import { db } from "../db";
 import { rpc } from "../tasks/store";
 
 /** Database locking makes overlapping schedulers and user starts converge on one task. */
 export async function dispatchResearch() {
+  const stale=await db().rpc('learning_reconcile_plans');
+  if(stale.error&&!['PGRST202','42883'].includes(stale.error.code))throw Error(stale.error.message);
   const plans = await db().from("research_plans").select("id,student_id,cycle_id,research_cycles!inner(state,autonomy,expires_at)").eq("status", "proposed")
     .eq("research_cycles.state", "active").eq("research_cycles.autonomy", true).gt("research_cycles.expires_at", new Date().toISOString())
     .order("priority", { ascending: false }).order("created_at").limit(100);
@@ -12,10 +15,11 @@ export async function dispatchResearch() {
   }
   await rpc("research_resume_tasks");
   for (const plan of plans.data) {
+    if (!await canRunBackground(plan.student_id)) continue;
     try { await rpc("research_start_plan", { p_student: plan.student_id, p_plan: plan.id, p_manual: false }); }
     catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      if (!/allowance|Between-visit|Another experiment|unsaved policy|cost review|not proposed/.test(reason)) throw error;
+      if (!/allowance|Between-visit|Another experiment|unsaved policy|cost review|not proposed|Learning experiment (baseline|prediction) changed|Responsibility follow-up changed or expired/.test(reason)) throw error;
       await rpc("research_append", { p_student: plan.student_id, p_cycle: plan.cycle_id, p_key: `waiting:${plan.id}:${reason}`,
         p_actor: "system", p_kind: "experiment.waiting", p_payload: { planId: plan.id, reason } });
     }

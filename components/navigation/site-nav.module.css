@@ -1,0 +1,36 @@
+/* Site navigation for every page outside the workspace shell. Ink & Print:
+   paper background, one hairline, typography carries the active state. One
+   short row: history carets, mark, Workspace, then one dropdown per group. */
+.bar { position: sticky; top: 0; z-index: 40; background: var(--background); border-bottom: 1px solid var(--border); }
+.inner { display: flex; align-items: center; gap: 14px; max-width: 1320px; margin: 0 auto; padding: 0 12px 0 8px; min-height: 44px; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 650; letter-spacing: -.4px; color: var(--foreground); text-decoration: none; white-space: nowrap; }
+.brand:hover { color: var(--accent-foreground); }
+.brand:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+.carets { display: inline-flex; align-items: center; gap: 2px; margin-right: -4px; }
+.caret { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 3px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.caret:hover { color: var(--foreground); background: var(--secondary); }
+.caret:active { background: var(--border); }
+.caret:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.caret:disabled { opacity: .35; cursor: default; background: transparent; }
+.groups { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+.link { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 9px; border: 0; border-radius: 3px; background: transparent; font: inherit; font-size: 12.5px; color: var(--muted-foreground); text-decoration: none; white-space: nowrap; cursor: pointer; }
+.link:hover, .link[data-state="open"] { color: var(--foreground); background: var(--secondary); }
+.link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.link[aria-current="page"] { color: var(--accent-foreground); font-weight: 600; }
+.link[aria-current="page"]::after { content: ""; position: absolute; left: 9px; right: 9px; bottom: 2px; height: 2px; background: var(--accent-foreground); border-radius: 1px; }
+.chevron { color: var(--muted-foreground); transition: transform 150ms ease; }
+.link[data-state="open"] .chevron { transform: rotate(180deg); }
+.dropdown { width: 280px; }
+.dropdownItem { display: grid !important; gap: 2px; }
+.dropdownItem span { font-size: 12.5px; }
+.dropdownItem small { font-size: 11px; line-height: 1.4; color: var(--muted-foreground); }
+.dropdownItem[data-highlighted] small { color: inherit; }
+.dropdownItem[aria-current="page"] span { color: var(--accent-foreground); font-weight: 600; }
+/* Inside the desktop app the title bar already says Softmax; keep the mark only and sit tighter under it. */
+:global(:root[data-shell="desktop"]) .wordmark { display: none; }
+:global(:root[data-shell="desktop"]) .inner { min-height: 40px; }
+@media (max-width: 480px) { .inner { gap: 8px; } .link { padding: 0 7px; } }
+@media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }
+/* Workspace shell brand: the mark sits close to the wordmark, overriding the
+   shell's wide gap that was sized for the tagline. */
+:global(.partner-brand > a.partner-brand-link) { gap: 8px; }

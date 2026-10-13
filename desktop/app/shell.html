@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Softmax IDE</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="shell">
+  <header class="titlebar">
+    <span class="wordmark">Softmax</span>
+    <nav class="desktop-tabs" aria-label="Desktop views">
+      <button id="workspace" aria-pressed="true">Workspace</button>
+      <button id="updates">Updates</button>
+      <button id="recording" hidden aria-pressed="false">Recording</button>
+      <button id="new" class="icon" title="New workspace (⌘N)" aria-label="New workspace">＋</button>
+    </nav>
+    <button id="stop-control" hidden>Stop Preston · Esc</button><span id="connection" class="connection">Connecting</span>
+    <div class="window-tools">
+      <button id="notifications" aria-pressed="false" title="Enable native notifications for Preston’s updates">Notify</button>
+      <button id="back" class="icon" title="Back" aria-label="Back">←</button>
+      <button id="reload" class="icon" title="Reload workspace" aria-label="Reload workspace">↻</button>
+      <button id="snapshot" class="icon" title="Save workspace image" aria-label="Save workspace image">▣</button>
+      <button id="fullscreen" class="icon" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+    </div>
+  </header>
+  <main class="connection-page">
+    <p class="eyebrow">SOFTMAX DESKTOP · PROTOTYPE</p>
+    <h1 id="heading">Opening your workspace</h1>
+    <p id="message">Connecting to Preston and your hosted research.</p>
+    <p id="origin" class="secondary"></p>
+    <div class="actions">
+      <button id="retry" hidden>Reconnect</button>
+      <button id="offline-open">Open a recording</button>
+    </div>
+    <p class="hint">Recordings and timestamped notes work offline.</p>
+    <section id="recent" hidden>
+      <h2>Recent recordings</h2>
+      <div id="recent-list"></div>
+    </section>
+    <p id="error" role="alert"></p>
+  </main>
+  <script src="shell.js"></script>
+</body>
+</html>

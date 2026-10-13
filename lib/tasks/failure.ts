@@ -16,7 +16,7 @@ export function isProviderRateLimit(message: string): boolean {
 }
 
 export function isProviderBillingFailure(message: string): boolean {
-  return /credit_balance_exhausted|no credits remaining|insufficient_quota|exceeded your current quota|billing hard limit/i.test(message);
+  return /credit_balance_exhausted|no credits|insufficient[_ ](?:quota|credits|funds)|exceeded your current quota|billing hard limit|credit balance.*(?:low|exhaust|zero)|credits?.*(?:exhausted|depleted)/i.test(message);
 }
 
 export function isProviderConfigurationFailure(message: string): boolean {

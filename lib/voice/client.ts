@@ -18,6 +18,8 @@ export class PrestonLive {
   private microphone: MediaStream | null = null;
   private audio: HTMLAudioElement | null = null;
   private lease = "";
+  private closeReported = false;
+  private pageExit = () => this.close();
   private journal: VoiceJournal | null = null;
   private transcriptSequence=0;
   private seen=new Set<string>();
@@ -37,6 +39,11 @@ export class PrestonLive {
   private ticks = 0;
   private speakingTimer?: ReturnType<typeof setTimeout>;
   private delegation: LiveDelegation;
+  private computerReviews=new Set<string>();
+  private computerReviewSettled=(event:Event)=>{
+    const id=(event as CustomEvent).detail?.reviewId;
+    if(!this.closing&&typeof id==='string'&&this.computerReviews.delete(id))this.note(`A human review control was used for computer action ${id}. This is a refresh hint, not evidence of execution. Use computer_action status with this reviewId before reporting the outcome. Do not repeat the proposed input.`);
+  };
   constructor(callbacks: Callbacks) {
     this.callbacks = callbacks;
     this.delegation = new LiveDelegation(event => this.send(event), call => this.execute(call), callbacks.working);
@@ -68,8 +75,11 @@ export class PrestonLive {
       const response = await fetch("/api/voice/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sdp: pc.localDescription?.sdp, leagueId:this.callbacks.leagueId, history: this.callbacks.history() }), signal: this.abort.signal });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Voice could not connect.");
-      if (this.closing) return;
-      this.lease = result.lease; this.callbacks.session?.(result.sessionId);
+      this.lease = result.lease;
+      if (this.closing) { this.reportClose(); return; }
+      window.addEventListener('pagehide',this.pageExit);
+      window.addEventListener('computer-review-settled',this.computerReviewSettled);
+      this.callbacks.session?.(result.sessionId);
       this.journal=new VoiceJournal(this.lease,this.callbacks.saved);
       await pc.setRemoteDescription({ type: "answer", sdp: result.sdp });
     } catch (error) {
@@ -117,12 +127,22 @@ export class PrestonLive {
     catch(error){this.log('tool',`Failed ${call.name} (${call.call_id}) after ${Math.round(performance.now() - started)}ms`);throw error;}
   }
   private async executeTool(call: FunctionCall): Promise<ToolResult> {
+    this.abort.signal.throwIfAborted();
     const local = await this.callbacks.tool(call);
+    this.abort.signal.throwIfAborted();
     if (local) return local;
-    const response = await fetch("/api/voice/tool", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lease: this.lease, callId: call.call_id, name: call.name, args: JSON.parse(call.arguments) }), signal: AbortSignal.timeout(60_000) });
+    const response = await fetch("/api/voice/tool", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lease: this.lease, callId: call.call_id, name: call.name, args: JSON.parse(call.arguments) }), signal: AbortSignal.any([this.abort.signal,AbortSignal.timeout(60_000)]) });
     const data = await response.json();
-    if (response.ok && call.name === "start_session" && data.result?.ok && data.result?.taskId) window.dispatchEvent(new Event("background-work-updated"));
-    return { result: data.result ?? { ok: false, error: data.error || "Operation unavailable" } };
+    this.abort.signal.throwIfAborted();
+    if(response.ok&&call.name==='computer_action'&&typeof data.result?.id==='string'){
+      if(data.result.status==='pending')this.computerReviews.add(data.result.id);
+      window.dispatchEvent(new CustomEvent('computer-review-updated',{detail:{reviewId:data.result.id}}));
+    }
+    if(response.ok&&data.result?.ok){
+      const taskId=call.name==='start_session'?data.result.taskId:call.name==='control_session'?data.result.session?.taskId:null;
+      if(taskId)window.dispatchEvent(new CustomEvent('background-work-updated',{detail:{taskId}}));
+    }
+    return { result: data.result ?? { ok: false, error: data.error || "Operation unavailable" }, ...response.ok&&call.name==='desktop_replay'?{...(typeof data.image==='string'?{image:data.image}:{}),...(Array.isArray(data.images)?{images:data.images}:{})}:{},...response.ok&&call.name==='inspect_computer'&&data.computerImage?{computerImage:data.computerImage}:{} };
   }
   private updateContext() {
     const context = JSON.stringify(this.callbacks.context());
@@ -164,6 +184,7 @@ export class PrestonLive {
   close() {
     if (this.closing) return;
     this.closing = true; this.abort.abort(); clearTimeout(this.startupTimer); clearInterval(this.contextTimer); clearTimeout(this.durationTimer);
+    this.reportClose();
     this.delegation.close(); this.microphone?.getTracks().forEach(track => track.stop());
     if (this.audio) { this.audio.pause(); this.audio.srcObject = null; }
     this.log("lifecycle","Client requested close");void this.journal?.flush();
@@ -174,8 +195,20 @@ export class PrestonLive {
     } else this.cleanup();
   }
   private fail(message: string) { this.callbacks.notice(message); this.close(); }
+  private reportClose() {
+    if(!this.lease||this.closeReported)return;this.closeReported=true;
+    const body=JSON.stringify({lease:this.lease});
+    void (async()=>{
+      for(let attempt=0;attempt<3;attempt++){
+        try{const response=await fetch('/api/voice/session/close',{method:'POST',headers:{'Content-Type':'application/json'},body,keepalive:true,signal:AbortSignal.timeout(5000)});if(response.ok||response.status<500)return;}catch{}
+        if(attempt<2)await new Promise(resolve=>setTimeout(resolve,500*(attempt+1)));
+      }
+      this.callbacks.notice('Voice ended locally, but server closure could not be confirmed. Its access expires within one hour.');
+    })();
+  }
   private cleanup() {
     if (this.finalized) return;
+    this.reportClose();window.removeEventListener('pagehide',this.pageExit);window.removeEventListener('computer-review-settled',this.computerReviewSettled);this.computerReviews.clear();
     this.log("lifecycle","Connection closed");void this.journal?.close();
     this.finalized = true; this.closing = true; this.ready = false; this.abort.abort();
     clearTimeout(this.closeTimer); clearTimeout(this.startupTimer); clearTimeout(this.durationTimer); clearInterval(this.contextTimer);

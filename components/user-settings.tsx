@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, AudioLines, SlidersHorizontal, UserRound } from "lucide-react";
+import { AudioLines, SlidersHorizontal, UserRound } from "lucide-react";
 import { defaultPreferences, preferencesSchema, voices, type UserPreferences } from "../lib/preferences";
 import {chatModels,modelLabels} from "../lib/model-selection";
 import { reasoningEfforts, reasoningLabels } from "../lib/reasoning";
@@ -60,7 +60,6 @@ export function UserSettings() {
   }
 
   return <main className="settings-page">
-    <header className="settings-header"><a href="/" className="settings-brand">Softmax</a><a href="/" className="settings-back"><ArrowLeft size={16} />Back to workspace</a></header>
     <div className="settings-content">
       <h1>Settings</h1><p className="settings-intro">How you and Preston work together.</p>
       {loading ? <p role="status">Loading settings…</p> : signedOut ? <p><a href="/">Sign in</a> to manage your settings.</p> : !saved ? <div><p role="alert">{error}</p><button type="button" onClick={() => void load()}>Try again</button></div> : <form onSubmit={save}>
@@ -83,8 +82,7 @@ export function UserSettings() {
           </section>
           <section className="settings-section" aria-labelledby="research-settings-heading">
             <h2 id="research-settings-heading">Research</h2>
-            <div className="settings-row"><div><label htmlFor="enforce-research-budget">Enforce spending limits</label><p id="enforce-budget-help">{draft.researchBudgetEnforced ? "Research pauses at the configured spending limits." : "Tracking only. Research continues without monetary limits."}</p></div><Switch id="enforce-research-budget" aria-describedby="enforce-budget-help" checked={draft.researchBudgetEnforced} onCheckedChange={checked => change("researchBudgetEnforced", checked)} /></div>
-            {draft.researchBudgetEnforced ? <div className="settings-row"><div><label htmlFor="daily-research-budget">Daily budget ($)</label><p id="daily-budget-help">Shared across background sessions and research. Resets at midnight Pacific. Set to 0 to stop new paid research.</p></div><Input id="daily-research-budget" type="number" min="0" max="1000" step="1" required value={draft.dailyResearchBudgetUsd} onChange={e => change("dailyResearchBudgetUsd", e.target.valueAsNumber)} aria-describedby="daily-budget-help" /></div> : null}
+            <div className="settings-row"><div><label htmlFor="daily-research-budget">Daily spending limit ($)</label><p id="daily-budget-help">Up to $25 (2,500 credits) per day, shared by chat, generation and research. Resets at midnight Pacific. Lower it to stop spending sooner.</p></div><Input id="daily-research-budget" type="number" min="0" max="25" step="1" required value={draft.dailyResearchBudgetUsd} onChange={e => change("dailyResearchBudgetUsd", e.target.valueAsNumber)} aria-describedby="daily-budget-help" /></div>
             <p className="settings-intro">Model calls, hosted games, reported costs, and unreported-cost reservations remain recorded in either mode. Reservations are accounting placeholders, not actual charges.</p>
           </section>
           <footer className="settings-actions"><button type="button" className="settings-reset" onClick={() => { setDraft({ ...defaultPreferences }); setMessage(""); setError(""); }}>Restore defaults</button><span role="status">{message || (dirty ? "Unsaved changes" : "")}</span><button type="submit" className="settings-save" disabled={!dirty || saving}>{saving ? "Saving…" : "Save changes"}</button></footer>

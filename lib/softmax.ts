@@ -8,6 +8,8 @@ const api = process.env.SOFTMAX_API_URL ?? "https://softmax.com/api";
 const whoamiSchema = z.object({
   subject_id: z.string(),
   subject_type: z.string(),
+  is_softmax_admin: z.boolean().default(false),
+  is_softmax_team_member: z.boolean().default(false),
   user_email: z.email(),
   name: z.string().nullable().optional(),
 });
@@ -89,6 +91,7 @@ const episodeResultSchema = z.object({
   participants: z.array(participantSchema).nullable(), participant_scores: z.array(seatScoreSchema).nullable(),
 });
 const episodeRequestSchema = z.object({
+  coworld_name: z.string().nullable().optional(),
   created_at: z.string().optional(),
   id: z.string(), status: z.string(), round_id: z.string().nullable(), coworld_id: z.string().nullable(),
   episode_id: z.string().nullable(), replay_url: z.string().nullable(), policy_version_ids: z.array(z.string()),
@@ -142,11 +145,13 @@ export class SoftmaxError extends Error {
   }
 }
 
-async function softmax<T extends z.ZodType>(path: string, token: string, schema: T, body?: unknown, signal?: AbortSignal): Promise<z.infer<T>> {
+async function softmax<T extends z.ZodType>(path: string, token: string, schema: T, body?: unknown, signal?: AbortSignal, elevated = false): Promise<z.infer<T>> {
   const response = await fetch(`${api}/observatory${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       Authorization: `Bearer ${token}`,
+      "User-Agent": "softmax-student-harness/1.0",
+      ...(elevated ? { "X-Use-Elevated-Privileges": "true" } : {}),
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -157,8 +162,8 @@ async function softmax<T extends z.ZodType>(path: string, token: string, schema:
   return schema.parse(await response.json()) as z.infer<T>;
 }
 
-export async function whoami(token: string, signal?: AbortSignal) {
-  return softmax("/whoami", token, whoamiSchema, undefined, signal);
+export async function whoami(token: string, signal?: AbortSignal, elevated = false) {
+  return softmax("/whoami", token, whoamiSchema, undefined, signal, elevated);
 }
 
 /** The player Softmax credits the caller's uploads and league entries to unless another is named. */
@@ -217,6 +222,13 @@ export async function listLeagueSubmissions(token: string, signal?: AbortSignal,
   return entries;
 }
 
+/** Bounded history page for interactive views. Never walk all history on a timer. */
+export async function listExperiencesPage(token: string, cursor?: string, limit = 20) {
+  const params = new URLSearchParams({ mine: "true", league_id: league.id, limit: String(Math.max(1, Math.min(20, limit))) });
+  if (cursor) params.set("cursor", cursor);
+  return softmax(`/v2/experience-requests?${params}`, token, experiencePageSchema);
+}
+
 export async function listExperiences(token: string) {
   const experiences: z.infer<typeof experienceSchema>[] = [];
   let cursor: string | null = null;
@@ -246,8 +258,20 @@ export async function getEpisodeResults(token: string, episodeRequestIds: string
   return page.entries;
 }
 
-export async function getEpisodeRequest(token: string, episodeRequestId: string) {
-  return softmax(`/v2/episode-requests/${episodeRequestId}`, token, episodeRequestSchema);
+export async function getEpisodeRequest(token: string, episodeRequestId: string, signal?:AbortSignal) {
+  return softmax(`/v2/episode-requests/${episodeRequestId}`, token, episodeRequestSchema,undefined,signal);
+}
+
+export async function getCompetitionRound(token:string,id:string,signal?:AbortSignal) {
+  return softmax(`/v2/rounds/${encodeURIComponent(id)}`,token,z.object({
+    id:z.string(),round_number:z.number(),status:z.string(),created_at:z.string(),
+    division:z.object({id:z.string(),name:z.string(),league:z.object({id:z.string(),name:z.string()})}),
+  }),undefined,signal);
+}
+export async function listRoundEpisodeRequests(token:string,roundId:string,cursor?:string,signal?:AbortSignal) {
+  const query=new URLSearchParams({limit:'25'});if(cursor)query.set('cursor',cursor);
+  return softmax(`/v2/rounds/${encodeURIComponent(roundId)}/episode-requests?${query}`,token,
+    episodeRequestPageSchema.extend({entries:z.array(episodeRequestSummarySchema).max(25)}),undefined,signal);
 }
 
 // Round numbers never change once a round exists, so they are kept for the life of the server instance.
@@ -374,6 +398,9 @@ export function policyStyleFromSummary(summary: string) {
 }
 
 export async function uploadPolicy(token: string, subjectId: string, source: string, title: string, policyName?: string, playerId?: string) {
+  // Persist the source-derived representation before creating the hosted version.
+  const { savePolicyRepresentation } = await import("./policy-representation-store.ts");
+  await savePolicyRepresentation(subjectId, source);
   const bytes = Buffer.from(source, "utf8");
   const contentHash = createHash("sha256").update(bytes).digest("hex");
   const name = policyName ?? policyNameFor(subjectId, "arena-hero");
@@ -402,7 +429,10 @@ export async function uploadPolicy(token: string, subjectId: string, source: str
     });
     if (!put.ok) throw new Error(`Policy file upload returned ${put.status}`);
   }
-  return softmax("/stats/policies/files/complete", token, policyVersionSchema, body);
+  const version=await softmax("/stats/policies/files/complete", token, policyVersionSchema, body);
+  const {saveUploadedSource}=await import('./policy-source-store.ts');
+  await saveUploadedSource(subjectId,version.id,source);
+  return version;
 }
 
 /** Keep repeated requests stable within a league, without reusing another league's game. */
@@ -458,4 +488,25 @@ export async function getCompetitionStandings(token:string,divisionId:string,sig
     rank:z.number().nullable().optional(),player_id:z.string(),player_name:z.string().nullable().optional(),score:z.number(),
     score_label:z.string().default("Score"),score_value_type:z.string().default("number"),rounds_played:z.number(),policy_label:z.string().nullable().optional(),
   })).nullable(),undefined,signal))??[];
+}
+
+const ownedPolicyRowSchema=z.object({policy_version_id:z.uuid(),policy_name:z.string(),version:z.number().int(),player_id:z.string().nullable().optional(),player_name:z.string().nullable().optional(),created_at:z.string()});
+/** One bounded, account-owned page. Names are search terms, never version IDs. */
+export async function listUploadedPolicies(token:string,options:{query?:string;policyVersionId?:string}={}){
+ const params=new URLSearchParams({mine:'true',limit:options.policyVersionId?'1':'20'});
+ if(options.query)params.set('q',z.string().max(120).parse(options.query));
+ if(options.policyVersionId)params.set('policy_version_id',z.uuid().parse(options.policyVersionId));
+ const page=await softmax(`/v2/policy-versions?${params}`,token,z.union([z.array(ownedPolicyRowSchema),z.object({entries:z.array(ownedPolicyRowSchema)})]));
+ return (Array.isArray(page)?page:page.entries).filter(row=>!options.policyVersionId||row.policy_version_id===options.policyVersionId);
+}
+const scopedSubmissionSchema=submissionSchema.extend({league:z.object({id:z.string()}),policy_version:z.object({id:z.uuid()}),player:z.object({id:z.string(),name:z.string()})});
+export type ScopedLeagueSubmission=z.infer<typeof scopedSubmissionSchema>;
+export async function lookupLeagueSubmission(token:string,leagueId:string,policyVersionId:string,playerId:string,signal?:AbortSignal){
+ const params=new URLSearchParams({mine:'true',league_id:leagueId,policy_version_id:policyVersionId,player_id:playerId,limit:'1'});
+ const page=await softmax(`/v2/league-submissions?${params}`,token,z.union([z.array(scopedSubmissionSchema),z.object({entries:z.array(scopedSubmissionSchema)})]),undefined,signal);
+ return (Array.isArray(page)?page:page.entries).find(r=>r.league.id===leagueId&&r.policy_version.id===policyVersionId&&r.player.id===playerId)??null;
+}
+/** Caller must persist a send allowance before invoking; no implicit retries. */
+export async function createLeagueSubmission(token:string,leagueId:string,policyVersionId:string,playerId:string){
+ return softmax('/v2/league-submissions',token,scopedSubmissionSchema,{league_id:leagueId,policy_version_id:policyVersionId,player_id:playerId,auto_champion:'always'});
 }

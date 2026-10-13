@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { cookieName, seal, unseal, type Session } from "./student-session";
+import { teamSession } from "./team-access";
 
 export { cookieName, seal, unseal, sessionFromCookieHeader, type Session } from "./student-session";
 
@@ -8,7 +9,7 @@ export async function currentSession(): Promise<Session | null> {
   const value = (await cookies()).get(cookieName)?.value;
   if (!value) return null;
   try {
-    return unseal(value);
+    return teamSession(unseal(value));
   } catch {
     return null;
   }

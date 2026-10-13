@@ -20,5 +20,5 @@ export const researchDecisionSchema = z.object({
 });
 export type ResearchDecision = z.infer<typeof researchDecisionSchema>;
 export type ResearchSettings = { student_id: string; enabled: boolean; call_limit: number; game_limit: number; calls_allocated: number; games_allocated: number; expires_at: string; interests: string; active_version_id: string | null };
-export type ResearchWake = { id: string; student_id: string; reason: string; token: string; status: string; lease_until: string; attempts: number; result: ResearchDecision | null };
+export type ResearchWake = { id: string; student_id: string; reason: string; token: string; status: string; lease_until: string; attempts: number; result: ResearchDecision | null; runtime_id?:string|null };
 export const settingsSchema = z.object({ enabled: z.boolean(), modelCalls: z.number().int().min(0).max(2000), hostedGames: z.number().int().min(0).max(100), expiresAt: z.iso.datetime(), interests: z.string().max(2000) });

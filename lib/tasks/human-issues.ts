@@ -14,7 +14,7 @@ export function humanIssues(tasks:IssueTask[]) {
     const key = kind==="question" ? JSON.stringify([plain.toLowerCase().replace(/[.!?]+$/,""),task.context?.policyId,task.context?.episodeId]) : `${kind}:${provider}`;
     const group = groups.get(key);
     if (group) group.taskIds.push(task.id);
-    else groups.set(key,{key,kind,text:billing?"Preston is paused because API credits are exhausted.":service?"Preston is paused by a service connection issue.":plain,taskIds:[task.id]});
+    else groups.set(key,{key,kind,text:billing?"Research stopped after an earlier billing error. Your current credit balance has not been checked.":service?"Preston is paused by a service connection issue.":plain,taskIds:[task.id]});
   }
   return [...groups.values()];
 }

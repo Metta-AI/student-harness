@@ -8,9 +8,13 @@ function fromRow(row: Record<string, unknown>): UserPreferences {
   return preferencesSchema.parse({ chatModel: row.chat_model??defaultChatModel, preferredName: row.preferred_name, voice: row.voice_name, responseLength: row.response_length, reasoningEffort: row.reasoning_effort, researchBudgetEnforced:row.research_budget_enforced, dailyResearchBudgetUsd: row.daily_research_budget_usd, liveCaptions: row.live_captions });
 }
 export async function userPreferences(subjectId: string): Promise<UserPreferences> {
-  const { data, error } = await db().from("students").select(columns).eq("subject_id", subjectId).single();
-  if (error || !data) throw new Error("Could not load preferences");
-  return fromRow(data);
+  for(let attempt=0;attempt<3;attempt++){
+    const {data,error}=await db().from("students").select(columns).eq("subject_id",subjectId).single();
+    if(!error&&data)return fromRow(data);
+    if(!error||['PGRST116','42501'].includes(error.code??''))break;
+    if(attempt<2)await new Promise(resolve=>setTimeout(resolve,250*(attempt+1)));
+  }
+  throw new Error("Could not load preferences. Retry when the connection recovers.");
 }
 export async function saveUserPreferences(subjectId: string, patch: Partial<UserPreferences>): Promise<UserPreferences> {
   const values: Record<string, unknown> = {};

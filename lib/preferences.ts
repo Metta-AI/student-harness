@@ -26,12 +26,12 @@ export const preferencesSchema = z.object({
   chatModel: z.enum(chatModels),
   reasoningEffort: z.enum(reasoningEfforts),
   liveCaptions: z.boolean(),
-  researchBudgetEnforced: z.boolean().default(false),
+  researchBudgetEnforced: z.boolean().default(true),
   dailyResearchBudgetUsd: z.number().min(0).max(1000).default(25),
 }).strict();
 export type UserPreferences = z.infer<typeof preferencesSchema>;
-export const defaultPreferences: UserPreferences = { chatModel: defaultChatModel, preferredName: "", voice: "marin", responseLength: "balanced", reasoningEffort: "low", liveCaptions: true, dailyResearchBudgetUsd: 25, researchBudgetEnforced: false };
-export const preferencesPatchSchema = preferencesSchema.partial().extend({ researchBudgetEnforced:z.boolean().optional(), dailyResearchBudgetUsd: z.number().min(0).max(1000).optional() }).refine(value => Object.keys(value).length > 0, "Choose a setting to update");
+export const defaultPreferences: UserPreferences = { chatModel: defaultChatModel, preferredName: "", voice: "marin", responseLength: "balanced", reasoningEffort: "low", liveCaptions: true, dailyResearchBudgetUsd: 25, researchBudgetEnforced: true };
+export const preferencesPatchSchema = preferencesSchema.partial().extend({ researchBudgetEnforced:z.literal(true).optional(), dailyResearchBudgetUsd: z.number().min(0).max(25).optional() }).refine(value => Object.keys(value).length > 0, "Choose a setting to update");
 
 export function preferenceInstructions(preferences: UserPreferences): string {
   const length = {

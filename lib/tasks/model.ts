@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const taskInputSchema = z.object({
   kind: z.enum(["experiment", "research"]).default("experiment"),
-  context: z.object({title:z.string().trim().max(120).optional(),leagueId:z.string().regex(/^league_[a-zA-Z0-9-]+$/).optional(),policyId:z.uuid().optional(),episodeId:z.string().max(150).optional(),mode:z.enum(["auto","analyze","model","replay","general","candidate"]).optional(),campaignId:z.uuid().optional(),role:z.string().max(80).optional(),baselineHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),releaseFingerprint:z.string().regex(/^[a-f0-9]{64}$/).optional()}).default({}),
+  context: z.object({title:z.string().trim().max(120).optional(),leagueId:z.string().regex(/^league_[a-zA-Z0-9-]+$/).optional(),policyId:z.uuid().optional(),episodeId:z.string().max(150).optional(),mode:z.enum(["auto","analyze","model","replay","general","candidate"]).optional(),campaignId:z.uuid().optional(),campaignLease:z.uuid().optional(),role:z.string().max(80).optional(),baselineHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),releaseFingerprint:z.string().regex(/^[a-f0-9]{64}$/).optional()}).default({}),
   objective: z.string().trim().min(12).max(6000),
   acceptanceCriteria: z.string().trim().min(12).max(2000),
   requestKey: z.string().min(8).max(160),
@@ -13,13 +13,16 @@ export type TaskInput = z.input<typeof taskInputSchema>;
 export type TaskStatus = "queued" | "running" | "waiting" | "paused" | "needs_input" | "completed" | "failed" | "canceled";
 export type TaskPhase = "propose" | "select" | "save" | "upload" | "request_game" | "evaluate" | "done";
 export type Task = {
+  runtime_id?: string | null;
+  direction_revision?: number;
   model_selection?: import("../model-selection").ModelSelection;
   kind?: "experiment" | "research";
-  context?: {leagueId?:string;title?:string;policyId?:string;episodeId?:string;mode?:string;campaignId?:string;role?:string;baselineHash?:string;releaseFingerprint?:string};
+  context?: {leagueId?:string;title?:string;policyId?:string;episodeId?:string;mode?:string;campaignId?:string;campaignLease?:string;role?:string;baselineHash?:string;releaseFingerprint?:string;responsibilityId?:string;responsibilityRevision?:number;studyId?:string;followUpExperiments?:boolean;triggerEvents?:{id:string;kind:string}[]};
   cycle_id?: string | null; plan_id?: string | null;
   id: string; student_id: string; objective: string; acceptance_criteria: string; base_version_id: string | null;
   status: TaskStatus; phase: TaskPhase; checkpoint: Record<string, unknown>; result: unknown;
   reason: string | null; generation: number; execution_key: string | null; lease_until: string | null;
+  origin_session_id?: string | null;
   session_id: string | null; attempts: number; max_attempts: number;
   model_calls: number; max_model_calls: number; reported_cost_usd: number; cost_reports: number; max_cost_usd: number;
   games_requested: number; max_games: number; deadline_at: string; created_at: string; updated_at: string;

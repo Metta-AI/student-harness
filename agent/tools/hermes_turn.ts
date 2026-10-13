@@ -1,10 +1,14 @@
 import {defineTool} from 'eve/tools';
+import {feedbackInstructions} from '../lib/feedback-instructions';
+import goalCompletion from './goal_completion';
+import {isGoalReviewRelay} from '../lib/goal-review-routing';
 import {defineDynamic} from 'eve';
 import {z} from 'zod';
 import {requireStudent} from '../lib/student';
 import {sessionLeague} from '../lib/game-scope';
 import {sessionModelSelection} from '../../lib/session-model';
-import {gatewayModelIds} from '../../lib/model-selection';
+import {gatewayModelFor} from '../../lib/model-selection';
+import {escalationLevel} from '../lib/model-escalation';
 import {runHermesTurn,type HermesTurnResult} from '../../lib/hermes/turn';
 
 /** Hermes mode: the conversation's work runs in Hermes on the account's shared
@@ -15,16 +19,24 @@ export const tool=defineTool({
  inputSchema:z.strictObject({message:z.string().min(1).max(50000)}),
  label:{start:()=>'Hermes is working'},
  async *execute({message},ctx){
+  // Mechanical routing: even if the relay model mistakes a framework message
+  // for human input, review against this original Eve turn, never via MCP.
+  if(isGoalReviewRelay(message)){
+   const review=await goalCompletion.execute!({},ctx);
+   const result={status:'reviewed' as const,review,note:'This is an internal Eve completion review, not a Hermes reply. Follow the review decision. If continue, perform its concrete next step; do not send the review instruction to Hermes.'};
+   yield result;return result;
+  }
   const student=await requireStudent(ctx);
+  yield {status:'working',activity:{kind:'commentary',text:'Preparing the research agent'},progress:['Preparing the research agent']};
   const leagueId=sessionLeague(ctx.session.auth);
   const selection=await sessionModelSelection(ctx.session.auth);
-  const preface=`[Harness context — not from the human]\nconversation_id: ${ctx.session.id}\nleague_id: ${leagueId}\nPass conversation_id on every harness (preston) tool call. If a harness tool returns approval_required, stop and say what you want to do; the conversation will ask the human and send you the outcome.\n\n`;
-  const turn=runHermesTurn({student:student.subjectId,eveSessionId:ctx.session.id,leagueId,title:message.slice(0,80),message:preface+message,model:gatewayModelIds[selection.model],signal:ctx.abortSignal});
+  const preface=`[Harness context — not from the human]\n${feedbackInstructions}\n\nconversation_id: ${ctx.session.id}\nleague_id: ${leagueId}\nPass conversation_id on every harness (preston) tool call. If a harness tool returns approval_required, stop and say what you want to do; the conversation will ask the human and send you the outcome.\n\n`;
+  const turn=runHermesTurn({student:student.subjectId,eveSessionId:ctx.session.id,leagueId,title:message.slice(0,80),message:preface+message,model:gatewayModelFor(selection.model,selection.model==='auto'?escalationLevel():0),signal:ctx.abortSignal});
   const progress:string[]=[];let next=await turn.next();
   while(!next.done){
    const item=next.value;
    progress.push(item.kind==='tool'?`${item.state} ${item.name}`:item.text.slice(0,200));
-   yield {status:'working',progress:progress.slice(-12)};
+   yield {status:'working',activity:item,progress:progress.slice(-12)};
    next=await turn.next();
   }
   const result:HermesTurnResult=next.value;

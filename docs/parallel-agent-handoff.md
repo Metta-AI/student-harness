@@ -1892,3 +1892,18 @@ Hermes mode is live on production; details in docs/hermes-mode.md.
 - Owner granted a one-day credit top-up to a $100 balance via
   `user_credit_topup_to_balance` (key `owner-topup-2026-10-13-10k`).
 - Production deployed three times with `--prod --force`; tsc clean each time.
+
+## 2026-10-13 Claude Code: Auto model default with escalation
+
+- New model choices: `auto` (default), `claude-haiku-5-5`, `gemini-3.8-flash`
+  (`lib/model-selection.ts`). Auto runs Haiku 5.5 (effort raised to at least
+  high), steps to Gemini 3.8 Flash at struggle score 3 and GPT-6.1 Sol at 6.
+- Struggle score (`agent/lib/model-escalation.ts`, `agent/hooks/model-escalation.ts`):
+  +1 per failed tool result or per step whose tool calls were all rejected for
+  invalid input, +2 per goal_completion `continue`; reset on `complete`/`no_goal`,
+  halved at each new turn. Used by `agent/lib/selected-model.ts` and `hermes_turn`.
+- Migration `20261013220000_auto_model_default.sql` APPLIED to production
+  (students.chat_model check/default 'auto', research_campaigns model check).
+  Owner account switched to `auto` at the owner's request.
+- Verified on production: forced failures moved steps Haiku → Gemini 3.8 Flash →
+  GPT-6.1 Sol, and back to Haiku after a complete review.
